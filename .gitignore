@@ -1,0 +1,12 @@
+# Секреты
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# Личное и временное
+.DS_Store
+Thumbs.db
+*.log
+node_modules/

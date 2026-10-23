@@ -1,0 +1,10 @@
+pymupdf
+python-docx
+openpyxl
+xlrd
+py7zr
+rarfile
+pytesseract
+pillow
+python-pptx
+striprtf

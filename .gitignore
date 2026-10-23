@@ -10,3 +10,15 @@ secrets/
 Thumbs.db
 *.log
 node_modules/
+
+# mail-downloader: настройки с паролем, скачанные вложения, окружение
+.mail_downloader.json
+mail-downloader/*.json
+mail-downloader/Вложения из почты/
+mail-downloader/Новая папка/
+mail-downloader/downloads/
+mail-downloader/*.bak
+__pycache__/
+*.pyc
+venv/
+.venv/

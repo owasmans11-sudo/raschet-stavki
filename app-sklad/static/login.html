@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход — Склад ВЛ</title>
+<style>
+  body { margin: 0; font: 15px/1.4 Arial, sans-serif; background: #EAF2FE; color: #1d2433;
+    display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  form { background: #fff; border-radius: 12px; padding: 28px 30px; width: min(360px, 92vw);
+    box-shadow: 0 10px 40px rgba(11, 74, 168, .15); border-top: 4px solid #1E6FE0; }
+  h1 { margin: 0 0 4px; color: #0B4AA8; font-size: 20px; }
+  p { margin: 0 0 18px; color: #6b7486; font-size: 13px; }
+  label { display: block; font-size: 12px; color: #6b7486; margin-bottom: 12px; }
+  input { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 9px 10px; font: inherit;
+    border: 1px solid #A9C8F5; border-radius: 6px; }
+  button { width: 100%; padding: 10px; font: inherit; font-weight: bold; color: #fff; background: #1E6FE0;
+    border: 0; border-radius: 6px; cursor: pointer; margin-top: 6px; }
+  #err { color: #d64545; font-size: 13px; min-height: 18px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<form id="f">
+  <h1>ВОСТОЧНАЯ ЛОГИСТИКА</h1>
+  <p>Склад ВЛ — вход. Логин и пароль — в блокноте «Склад ВЛ — вход» на рабочем столе.</p>
+  <label>Логин<input name="login" autocomplete="username" autofocus></label>
+  <label>Пароль<input name="password" type="password" autocomplete="current-password"></label>
+  <button>Войти</button>
+  <div id="err"></div>
+</form>
+<script>
+document.getElementById('f').onsubmit = async e => {
+  e.preventDefault();
+  const f = e.target, err = document.getElementById('err');
+  err.textContent = '';
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: f.login.value, password: f.password.value }) });
+  if (r.ok) location.href = '/';
+  else err.textContent = (await r.json()).error || 'Не удалось войти';
+};
+</script>
+</body>
+</html>

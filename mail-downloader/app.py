@@ -1,4 +1,4 @@
-"""Окно приложения: кнопка «Скачать» и выбор периода."""
+"""Окно приложения: кнопка «Скачать», даты «с … по …» и раскладка по папкам."""
 
 import json
 import os
@@ -7,7 +7,8 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from mail_core import PERIODS, PROVIDERS, download_attachments
+from mail_core import (LAYOUTS, PROVIDERS, QUICK_PERIODS, download_attachments,
+                       parse_ru_date, quick_period)
 
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".mail_downloader.json")
 DEFAULT_DIR = os.path.join(os.path.expanduser("~"), "Downloads", "Вложения из почты")
@@ -33,8 +34,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Вложения из почты")
-        self.geometry("620x520")
-        self.minsize(520, 420)
+        self.geometry("660x600")
+        self.minsize(560, 480)
 
         s = load_settings()
         self.events = queue.Queue()
@@ -48,10 +49,20 @@ class App(tk.Tk):
         self.btn = ttk.Button(top, text="⬇  Скачать", command=self.start)
         self.btn.pack(side="left", ipadx=12, ipady=6)
 
-        self.period = tk.StringVar(value=s.get("period", "Месяц"))
-        for name in PERIODS:
-            ttk.Radiobutton(top, text=name, value=name,
-                            variable=self.period).pack(side="left", padx=(16, 0))
+        d_from, d_to = quick_period("Месяц")
+        self.date_from = tk.StringVar(value=s.get("date_from", f"{d_from:%d.%m.%Y}"))
+        self.date_to = tk.StringVar(value=s.get("date_to", f"{d_to:%d.%m.%Y}"))
+        ttk.Label(top, text="с").pack(side="left", padx=(16, 4))
+        ttk.Entry(top, textvariable=self.date_from, width=11).pack(side="left")
+        ttk.Label(top, text="по").pack(side="left", padx=(8, 4))
+        ttk.Entry(top, textvariable=self.date_to, width=11).pack(side="left")
+
+        quick = ttk.Frame(self, padding=(12, 0, 12, 8))
+        quick.pack(fill="x")
+        ttk.Label(quick, text="Быстро:").pack(side="left")
+        for name in QUICK_PERIODS:
+            ttk.Button(quick, text=name, command=lambda n=name: self.set_period(n)).pack(
+                side="left", padx=(4, 0))
 
         # --- Настройки почты ---
         box = ttk.LabelFrame(self, text="Почта", padding=10)
@@ -89,6 +100,14 @@ class App(tk.Tk):
         ttk.Entry(row, textvariable=self.out_dir).pack(side="left", fill="x", expand=True)
         ttk.Button(row, text="…", width=3, command=self.choose_dir).pack(side="left", padx=(4, 0))
 
+        self.layout = tk.StringVar(value=s.get("layout", "По месяцам"))
+        self.save_text = tk.BooleanVar(value=s.get("save_text", True))
+        ttk.Label(box, text="Раскладка").grid(row=6, column=0, sticky="w")
+        ttk.Combobox(box, textvariable=self.layout, values=LAYOUTS, state="readonly").grid(
+            row=6, column=1, sticky="ew", pady=2)
+        ttk.Checkbutton(box, text="Сохранять текст писем (и писем без вложений — например, отмен)",
+                        variable=self.save_text).grid(row=7, column=1, sticky="w")
+
         # --- Прогресс и журнал ---
         self.bar = ttk.Progressbar(self, mode="determinate")
         self.bar.pack(fill="x", padx=12, pady=(10, 4))
@@ -99,6 +118,7 @@ class App(tk.Tk):
         bottom = ttk.Frame(self, padding=(12, 0, 12, 10))
         bottom.pack(fill="x")
         ttk.Button(bottom, text="Открыть папку", command=self.open_dir).pack(side="right")
+        ttk.Button(bottom, text="Открыть опись", command=self.open_opis).pack(side="right", padx=(0, 6))
 
         self.after(100, self.poll)
 
@@ -108,6 +128,18 @@ class App(tk.Tk):
         if host:
             self.host.set(host)
 
+    def set_period(self, name):
+        d_from, d_to = quick_period(name)
+        self.date_from.set(f"{d_from:%d.%m.%Y}")
+        self.date_to.set(f"{d_to:%d.%m.%Y}")
+
+    def open_opis(self):
+        path = os.path.join(self.out_dir.get(), "Опись.html")
+        if not os.path.exists(path):
+            messagebox.showinfo("Описи пока нет", "Опись появится после первого скачивания в эту папку.")
+            return
+        self.open_path(path)
+
     def choose_dir(self):
         d = filedialog.askdirectory(initialdir=self.out_dir.get() or os.path.expanduser("~"))
         if d:
@@ -116,6 +148,10 @@ class App(tk.Tk):
     def open_dir(self):
         d = self.out_dir.get()
         os.makedirs(d, exist_ok=True)
+        self.open_path(d)
+
+    @staticmethod
+    def open_path(d):
         if os.name == "nt":
             os.startfile(d)
         elif os.uname().sysname == "Darwin":
@@ -141,29 +177,44 @@ class App(tk.Tk):
                                    "Заполните сервер, адрес почты и пароль приложения.")
             return
 
+        try:
+            date_from = parse_ru_date(self.date_from.get())
+            date_to = parse_ru_date(self.date_to.get())
+        except ValueError:
+            messagebox.showwarning("Неверная дата", "Даты пишите так: 01.07.2026")
+            return
+        if date_from > date_to:
+            messagebox.showwarning("Неверный период", "Дата «с» позже даты «по».")
+            return
+
         save_settings({
-            "period": self.period.get(), "provider": self.provider.get(),
+            "date_from": self.date_from.get().strip(), "date_to": self.date_to.get().strip(),
+            "layout": self.layout.get(), "save_text": self.save_text.get(),
+            "provider": self.provider.get(),
             "host": host, "login": login, "out_dir": self.out_dir.get(),
             "password": pwd if self.remember.get() else "",
         })
 
-        days = PERIODS[self.period.get()]
+        layout, save_text = self.layout.get(), self.save_text.get()
         out_dir = self.out_dir.get()
         self.stop_requested = False
         self.bar["value"] = 0
         self.btn.configure(text="■  Остановить")
-        self.log(f"— Скачиваю вложения за период: {self.period.get().lower()} —")
+        self.log(f"— Скачиваю с {date_from:%d.%m.%Y} по {date_to:%d.%m.%Y}, "
+                 f"раскладка: {layout.lower()} —")
 
         def run():
             try:
-                letters, files = download_attachments(
-                    host, login, pwd, days, out_dir,
+                letters, files, texts = download_attachments(
+                    host, login, pwd, date_from, date_to, out_dir,
+                    layout=layout, save_text=save_text,
                     log=lambda t: self.events.put(("log", t)),
                     progress=lambda d, t: self.events.put(("progress", (d, t))),
                     stop_flag=lambda: self.stop_requested,
                 )
                 self.events.put(("done", f"Готово: просмотрено писем {letters}, "
-                                         f"сохранено файлов {files}.\nПапка: {out_dir}"))
+                                         f"сохранено файлов {files}, текстов писем {texts}.\n"
+                                         f"Папка: {out_dir}\nОпись: Опись.html в этой папке"))
             except Exception as e:
                 text = str(e)
                 if "AUTHENTICATIONFAILED" in text or "Invalid credentials" in text:

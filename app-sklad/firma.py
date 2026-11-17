@@ -51,6 +51,8 @@ def _joined(t):
 def _num(t, pattern, join=False):
     """Все совпадения числа: [(позиция, число)]. join — склеить группы цифр (счета 4070 2810 …)."""
     j = _joined(t) if join else t
+    if join:
+        pattern = pattern.replace(r'\d{17}', r'(?:\x00*\d){17}')
     return [(m.start(), m.group(1).replace('\x00', '')) for m in re.finditer(pattern, j)]
 
 
@@ -58,7 +60,7 @@ def _after(t, label, stop=r'\n|(?:инн|кпп|огрн|р/?с|расч|бик|
     """Текст после подписи до следующей подписи / конца строки: [(позиция, текст)]."""
     out = []
     for m in re.finditer(label, t, re.I):
-        rest = t[m.end():m.end() + 220]
+        rest = t[m.end():m.end() + 220].lstrip(' :\t\r\n')
         s = re.split(stop, rest, maxsplit=1, flags=re.I)[0]
         s = re.sub(r'\s+', ' ', s).strip(' :;,.-')
         if len(s) >= 5:
@@ -92,15 +94,29 @@ def columns(t):
     return ['\n'.join(left), '\n'.join(right)]
 
 
+def party_table_columns(text):
+    """Явные колонки Заказчик/Перевозчик: граница по ячейке роли, а не первому табу."""
+    rows = [line.split('\t') for line in text.split('\n')]
+    role = re.compile(r'^\s*(заказчик|перевозчик|исполнитель|экспедитор)\s*:?\s*$', re.I)
+    for start, row in enumerate(rows):
+        labels = [(i, m[1].lower()) for i, cell in enumerate(row) if (m := role.fullmatch(cell))]
+        if len(labels) >= 2 and labels[0][1] != labels[1][1]:
+            split = labels[1][0]
+            return ['\n'.join('\t'.join(row[:split]) for row in rows[start:]),
+                    '\n'.join('\t'.join(row[split:]) for row in rows[start:])]
+    return None
+
+
 def candidates(text):
     """Все компании в документе. Две колонки реквизитов разбираем по отдельности, затем — весь текст
     (для компаний вне колонок, например грузоотправитель в шапке). Наши — отбрасываем."""
     t = re.sub(r'(?<![\w])[ОO0]{3}(?=\s*[«"“])', 'ООО', fix(text))  # «О0О «…»» → ООО
-    cols = columns(t)
+    party_cols = party_table_columns(t)
+    cols = party_cols or columns(t)
     if not cols:
         return _candidates(t.replace('\t', ' '))
     found = {}
-    for part in cols + [t.replace('\t', ' ')]:
+    for part in (cols if party_cols else cols + [t.replace('\t', ' ')]):
         for c in _candidates(part):
             cur = found.setdefault(c['inn'], {})
             for k, v in c.items():
@@ -120,11 +136,23 @@ def _candidates(t):
     if not anchors:
         return []
     comp = {inn: {'inn': inn} for inn in anchors}
+    # Заголовки сторон ограничивают область реквизитов. Банк исполнителя
+    # не должен становиться компанией следующего заказчика.
+    headings = list(re.finditer(r'(?im)^[ \t]*(?:заказчик|исполнитель|перевозчик|экспедитор|клиент)[ \t]*:?[ \t\r]*$', t))
+    blocks = [(m.end(), headings[i + 1].start() if i + 1 < len(headings) else len(t))
+              for i, m in enumerate(headings)]
 
     def nearest(pos, before=False):
         """ИНН, ближайший к позиции. before — значение обычно стоит ДО своего ИНН (название компании)."""
         best, dist = None, 900
-        for inn, ps in anchors.items():
+        local = anchors
+        block = next(((a, b) for a, b in blocks if a <= pos < b), None)
+        if block:
+            scoped = {inn: [p for p in ps if block[0] <= p < block[1]] for inn, ps in anchors.items()}
+            scoped = {inn: ps for inn, ps in scoped.items() if ps}
+            if scoped:
+                local = scoped
+        for inn, ps in local.items():
             for p in ps:
                 if before and p - pos < -40:
                     continue
@@ -150,9 +178,9 @@ def _candidates(t):
         put('rs', pos, v)
     for pos, v in _num(t, r'(?<![\d\x00])(301\d{17})(?![\d\x00])', join=True):
         put('ks', pos, v)
-    for pos, s in _after(t, r'(юридическ\w*\s+адрес|юр\.?\s*адрес|адрес\s+регистрации|место\s*нахождени\w*|адрес\s+местонахождени\w*)'):
+    for pos, s in _after(t, r'(юридическ\w*\s+адрес|юр\.?\s*адрес|адрес\s+регистрации|место\s*нахождени\w*|адрес\s+местонахождени\w*)', stop=r'\n(?=\s*(?:фактическ|юридическ|почтов|телефон|инн|кпп|огрн|расч[её]т|банк|бик|к/с|оквэд|управляющ|e-mail|эл\.?\s*почта))|(?:инн|кпп|огрн|р/?с|расч|бик|к/?с|корр|тел|e-?mail|эл\.?\s*почта|банк)\b'):
         put('address', pos, s)
-    for pos, s in _after(t, r'(почтов\w*\s+адрес|почт\.?\s*адрес|фактическ\w*\s+адрес|адрес\s+для\s+корреспонденци\w*)'):
+    for pos, s in _after(t, r'(почтов\w*\s+адрес|почт\.?\s*адрес|фактическ\w*\s+адрес|адрес\s+для\s+корреспонденци\w*)', stop=r'\n(?=\s*(?:фактическ|юридическ|почтов|телефон|инн|кпп|огрн|расч[её]т|банк|бик|к/с|оквэд|управляющ|e-mail|эл\.?\s*почта))|(?:инн|кпп|огрн|р/?с|расч|бик|к/?с|корр|тел|e-?mail|эл\.?\s*почта|банк)\b'):
         put('post_address', pos, s)
     for pos, s in _after(t, r'(?:наименование\s+банка|банк\s+получателя|\bбанк\b)[\s:]*', stop=r'\n|бик|к/?с|корр|р/?с|инн|г\.\s*\w+\s*$'):
         if not re.match(r'(получател|бик|\d)', s, re.I):
@@ -161,12 +189,16 @@ def _candidates(t):
         put('director', m.start(), re.sub(r'\s+', ' ', m.group(1)).strip())
         put('basis', m.start(), m.group(2).strip())
     W = r'[А-ЯЁа-яё][а-яё]+|[А-ЯЁ]{2,}'
-    for m in re.finditer(rf'(генеральн\w*\s+директор\w*|директор\w*|руководител\w*)[\s:—-]+((?:{W})\s+(?:(?:{W})\s+(?:{W})|[А-ЯЁа-яё]\.\s*[А-ЯЁа-яё]\.?))', t, re.I):
+    for m in re.finditer(rf'(генеральн\w*\s+директор\w*|директор\w*|руководител\w*|управляющ\w*)[\s:—-]+((?:{W})\s+(?:(?:{W})\s+(?:{W})|[А-ЯЁа-яё]\.\s*[А-ЯЁа-яё]\.?))', t, re.I):
         fio = m.group(2)
         if not re.search(r'действ|на основании|общества|организац', fio, re.I):
             put('director', m.start(), f'{m.group(1).capitalize()} {" ".join(w.capitalize() if not w.endswith(".") else w.upper() for w in fio.split())}')
     for m in re.finditer(r'(?:\+7|\b8)[\s(-]*(\d{3})[\s)-]*(\d{3})[\s-]*(\d{2})[\s-]*(\d{2})\b', t):
         put('phone', m.start(), f'+7 ({m[1]}) {m[2]}-{m[3]}-{m[4]}')
+    for m in re.finditer(r'(?<!\d)(?:\+7|8)?\s*\((\d{3,5})\)\s*(\d[\d -]{4,9}\d)(?!\d)', t):
+        subscriber = re.sub(r'\D', '', m[2])
+        if len(m[1] + subscriber) == 10:
+            put('phone', m.start(), f'+7 ({m[1]}) {m[2].strip()}')
     for m in re.finditer(r'[\w.+-]+@[\w-]+\.[\w.]+', t):
         put('email', m.start(), m.group(0).lower())
     # название: «Сокращённое наименование» в карточке, иначе ближайшая организационная форма перед ИНН
@@ -177,6 +209,30 @@ def _candidates(t):
     for m in ORG.finditer(t):
         if not OUR_NAME.search(m.group(0)):
             put('name', m.start(), _name(m.group(1), m.group(2)), before=True)
+
+    # Банковская строка «в АО «... БАНК»» сохраняется как банк, не как сторона договора.
+    for m in re.finditer(r'(?im)^[ \t]*(?:в[ \t]+)?((?:АО|ПАО|ООО)[ \t]+[«"][^»"\n]*(?:БАНК|СБЕРБАНК)[^»"\n]*[»"][^\n]*)', t):
+        inn = nearest(m.start())
+        if inn:
+            comp[inn]['bank'] = re.sub(r'\s+', ' ', m.group(1)).strip(' ,;')
+
+    # Название после явного заголовка стороны надежнее названия банка.
+    for a, b in blocks:
+        block_inns = [(p, inn) for inn, ps in anchors.items() for p in ps if a <= p < b]
+        if not block_inns:
+            continue
+        first_pos, inn = min(block_inns)
+        org = ORG.search(t, a, first_pos)
+        if org:
+            comp[inn]['name'] = _name(org.group(1), org.group(2))
+
+    # Торговый дом/транспортная компания перед кавычками — часть юридического названия.
+    prefixed_org = re.compile(r'(общество\s+с\s+ограниченной\s+ответственностью|ООО|АО|ПАО)\s+(ТД|ТК)\s*[«"]([^»"\n]+)[»"]', re.I)
+    for match in prefixed_org.finditer(t):
+        inn = nearest(match.start(), before=True)
+        if inn:
+            kind = SHORT.get(re.sub(r'\s+', ' ', match[1].lower()), match[1].upper())
+            comp[inn]['name'] = f'{kind} {match[2].upper()} «{match[3].strip()}»'
 
     out = []
     for inn, c in comp.items():

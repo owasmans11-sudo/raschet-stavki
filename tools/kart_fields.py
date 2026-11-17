@@ -129,18 +129,20 @@ def driver(lines):
                     return m.group(1)
     return ''
 
-LOAD_LABEL = re.compile(r'(адрес|место|пункт)[^\n]{0,25}(погрузк|загрузк)|^(погрузка|загрузка)\b|грузоотправитель и место погрузки', re.I)
+LOAD_LABEL = re.compile(r'(адрес|место|пункт)[^\n]{0,25}(погрузк|загрузк|отгрузк)|^(погрузка|загрузка|отгрузка)\b|грузоотправитель и место погрузки', re.I)
 UNLOAD = re.compile(r'выгрузк|разгрузк|грузополучател', re.I)
 
 def loading(lines):
     date = place = ''
+    explicit_address = re.compile(r'адрес[^\n]{0,25}(?:погрузк|загрузк|отгрузк)', re.I)
+    has_address = any(explicit_address.search(line) for line in lines)
     for i, l in enumerate(lines):
         low = l.lower()
-        if not date and re.search(r'(дата|время|срок)[^\n]{0,25}(погрузк|загрузк|подач)|(погрузк|загрузк)[^\n]{0,15}(дата|:)', low) and not UNLOAD.search(low[:15]):
+        if not date and re.search(r'(дата|время|срок)[^\n]{0,25}(погрузк|загрузк|отгрузк|подач)|(погрузк|загрузк|отгрузк)[^\n]{0,15}(дата|:)', low) and not UNLOAD.search(low[:15]):
             date = find_date(' '.join(lines[i:i + 3]))
-        if not place and LOAD_LABEL.search(l) and not UNLOAD.search(low.split('погруз')[0].split('загруз')[0]):
-            rest = re.split(r'(?:погрузк|загрузк)\S*', l, maxsplit=1, flags=re.I)[-1]
-            rest = re.sub(r'^[\s:.\-1)]+', '', rest).rstrip(' :-')  # было strip(' :.-1)') — съедало «д. 1» в конце адреса
+        if not place and (not has_address or explicit_address.search(l)) and LOAD_LABEL.search(l) and not UNLOAD.search(low.split('погруз')[0].split('загруз')[0].split('отгруз')[0]):
+            rest = re.split(r'(?:погрузк|загрузк|отгрузк)\S*', l, maxsplit=1, flags=re.I)[-1]
+            rest = re.sub(r'^[\s:.\-]*(?:1\)\s*)?', '', rest).rstrip(' :-')  # было strip(' :.-1)') — съедало «д. 1» в конце адреса
             cand = rest if len(re.findall(r'[А-Яа-яЁё]{3,}', rest)) >= 2 else ''
             k = i + 1
             while not cand and k < min(i + 4, len(lines)):

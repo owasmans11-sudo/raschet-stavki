@@ -1,4 +1,4 @@
-# Вход в приложение «Склад»: одна учётная запись (владелец: «поставь пока что на меня одного»).
+# Вход в приложение «Склад»: отдельные учётные записи и сеансы пользователей.
 # Пароль хранится только хешем (PBKDF2); открытым текстом — лишь в блокноте на рабочем столе (просьба владельца).
 # Забыли пароль / удалили блокнот: python app-sklad/server.py --reset-password — новый пароль запишется в блокнот.
 import hashlib
@@ -49,12 +49,13 @@ def _write_note(password, port):
         'Не пересылайте этот файл и не кладите его в общие папки.\n', encoding='utf-8')
 
 
-def set_password(con, password, port):
+def set_password(con, password, port, user=LOGIN):
     con.execute('INSERT INTO auth(login, pass_hash, changed) VALUES (?,?,?) '
                 'ON CONFLICT(login) DO UPDATE SET pass_hash=excluded.pass_hash, changed=excluded.changed',
-                (LOGIN, _hash(password), time.strftime('%Y-%m-%d %H:%M')))
-    con.execute('DELETE FROM sessions')  # после смены пароля — войти заново везде
-    _write_note(password, port)
+                (user, _hash(password), time.strftime('%Y-%m-%d %H:%M')))
+    con.execute('DELETE FROM sessions WHERE login=?', (user,))
+    if user == LOGIN:
+        _write_note(password, port)
 
 
 def init(con, port, reset=False):
@@ -67,32 +68,47 @@ def init(con, port, reset=False):
 
 
 def login(con, user, password):
-    row = con.execute('SELECT pass_hash FROM auth WHERE login=?', ((user or '').strip().lower(),)).fetchone()
+    user = (user or '').strip().lower()
+    row = con.execute('SELECT pass_hash FROM auth WHERE login=?', (user,)).fetchone()
     if not row or not _verify(password or '', row[0]):
         time.sleep(1)  # медленно на неверном пароле — против подбора
         return None
     token = secrets.token_urlsafe(32)
-    con.execute('INSERT INTO sessions(token, login, created) VALUES (?,?,?)', (token, LOGIN, time.time()))
+    con.execute('INSERT INTO sessions(token, login, created) VALUES (?,?,?)', (token, user, time.time()))
     return token
 
 
-def check(con, token):
+def session_login(con, token):
     if not token:
-        return False
-    row = con.execute('SELECT created FROM sessions WHERE token=?', (token,)).fetchone()
-    return bool(row) and time.time() - row[0] < SESSION_DAYS * 86400
+        return None
+    row = con.execute('SELECT s.login,s.created FROM sessions s JOIN auth a ON a.login=s.login WHERE s.token=?', (token,)).fetchone()
+    return row[0] if row and time.time() - row[1] < SESSION_DAYS * 86400 else None
+
+
+def check(con, token):
+    return session_login(con, token) is not None
 
 
 def logout(con, token):
     con.execute('DELETE FROM sessions WHERE token=?', (token,))
 
 
-def change(con, old, new, port):
-    row = con.execute('SELECT pass_hash FROM auth WHERE login=?', (LOGIN,)).fetchone()
+def change(con, old, new, port, user=LOGIN):
+    row = con.execute('SELECT pass_hash FROM auth WHERE login=?', (user,)).fetchone()
     if not row or not _verify(old or '', row[0]):
         time.sleep(1)
         return 'Старый пароль неверный'
     if len(new or '') < 8:
         return 'Новый пароль — не короче 8 символов'
-    set_password(con, new, port)
+    set_password(con, new, port, user=user)
     return ''
+
+
+def create_user(con, user, password):
+    user = (user or '').strip().lower()
+    if not user or not user.isascii() or not all(c.isalnum() or c in '_-' for c in user):
+        raise ValueError('Логин: латинские буквы, цифры, дефис или подчеркивание')
+    if len(password) < 8:
+        raise ValueError('Пароль должен быть не короче 8 символов')
+    con.execute('INSERT INTO auth(login,pass_hash,changed) VALUES (?,?,?)',
+                (user, _hash(password), time.strftime('%Y-%m-%d %H:%M')))

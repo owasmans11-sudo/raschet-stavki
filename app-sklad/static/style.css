@@ -121,3 +121,19 @@ input.gap { background: var(--yellow); border-color: var(--orange); }
 /* вкладка «Оплаты» */
 td.purp { font-size: 12px; color: var(--muted); max-width: 340px; }
 details { margin-top: 16px; }
+
+/* Полноразмерные секции внутри формы не должны становиться узкими колонками. */
+.grid > .full { grid-column: 1 / -1; }
+.grid > *, fieldset, .vodform, .vodwrap > * { min-width: 0; }
+.grid { grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); }
+.grid input, .grid select, .grid textarea { width: 100%; box-sizing: border-box; }
+legend { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+#ff > .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.driver-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; align-items: start; }
+.driver-sections > fieldset { margin-top: 8px; }
+.driver-sections > .passport-section { grid-column: 1 / -1; }
+.carrier-upload { margin: 0 0 10px; }
+@media (max-width: 700px) {
+  #ff > .grid, .driver-sections { grid-template-columns: minmax(0, 1fr); }
+  .grid label.wide { grid-column: 1 / -1; }
+}

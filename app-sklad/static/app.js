@@ -75,27 +75,72 @@ function furaCommon(f) {
 }
 const furaKg = f => S.reys.filter(r => r.fura_id === f.id).reduce((s, r) => s + (num(gruzById(r.gruz_id)?.kg) || 0), 0);
 
+function furaExpensePart(f, g) {
+  const rows = S.reys.filter(r => r.fura_id === f.id && gruzById(r.gruz_id));
+  const kg = furaKg(f);
+  return kg ? (num(g.kg) || 0) / kg : rows.length ? 1 / rows.length : 0;
+}
+
+const furaFinanceCache = new WeakMap();
+function furaFinance(f) {
+  if (!furaFinanceCache.has(S)) furaFinanceCache.set(S, new Map());
+  const cache = furaFinanceCache.get(S);
+  if (cache.has(f.id)) return cache.get(f.id);
+  const common = furaCommon(f);
+  const entries = S.reys.filter(r => r.fura_id === f.id).map(r => ({ r, g: gruzById(r.gruz_id) })).filter(x => x.g).map(({ r, g }) => {
+    const b = calcBase(g);
+    const trips = gruzReys(g).map(r => fura(r.fura_id)).filter(Boolean);
+    const tripCosts = trips.map(trip => Math.abs(furaCommon(trip).sum * furaExpensePart(trip, g)));
+    const totalCost = tripCosts.reduce((sum, cost) => sum + cost, 0);
+    // При перегрузе один доход и свои расходы делятся по долям расходов фур; без расходов — поровну.
+    const portion = totalCost ? Math.abs(common.sum * furaExpensePart(f, g)) / totalCost : 1 / Math.max(trips.length, 1);
+    const expense = common.sum * furaExpensePart(f, g);
+    const vatPart = b.osno && g.pay_form === 'с НДС' ? common.vat * furaExpensePart(f, g) : 0;
+    const before = (b.rev - b.nalog - b.own + b.ownVat) * portion - expense + vatPart;
+    return { ...r, g, rev: b.rev * portion, legs: legsSum(g) * portion, before, expense,
+      taxable: b.osno && g.pay_form !== 'наличные', np: 0 };
+  });
+  const groups = new Map();
+  entries.filter(e => e.taxable).forEach(e => {
+    if (!groups.has(e.g.company)) groups.set(e.g.company, []);
+    groups.get(e.g.company).push(e);
+  });
+  const taxes = [];
+  for (const [company, group] of groups) {
+    const base = group.reduce((sum, e) => sum + e.before, 0);
+    const tax = Math.max(base, 0) * NNP;
+    const positive = group.reduce((sum, e) => sum + Math.max(e.before, 0), 0);
+    group.forEach(e => e.np = positive ? tax * Math.max(e.before, 0) / positive : 0);
+    taxes.push({ company, base, tax });
+  }
+  entries.forEach(e => e.profit = e.before - e.np);
+  const before = entries.length ? entries.reduce((sum, e) => sum + e.before, 0) : -common.sum;
+  const np = taxes.reduce((sum, item) => sum + item.tax, 0);
+  const result = { entries, taxes, before, np, profit: before - np };
+  cache.set(f.id, result);
+  return result;
+}
+
 function furaCalc(f) {
-  const rs = S.reys.filter(r => r.fura_id === f.id).map(r => ({ ...r, g: gruzById(r.gruz_id) })).filter(r => r.g);
+  const finance = furaFinance(f);
+  const rs = finance.entries;
   const gs = rs.map(r => r.g);
   const kg = furaKg(f);
   const m3 = gs.reduce((s, g) => s + (num(g.m3) || 0), 0);
   const common = furaCommon(f).sum;
   const perKg = kg ? common / kg : 0;
-  const share = g => (num(g.kg) || 0) * perKg;
-  const income = gs.reduce((s, g) => s + (num(g.rate_client) || 0), 0);
-  const legs = gs.reduce((s, g) => s + legsSum(g), 0);
+  const share = g => common * furaExpensePart(f, g);
+  const income = rs.reduce((sum, e) => sum + e.rev, 0);
+  const legs = rs.reduce((sum, e) => sum + e.legs, 0);
   const multi = gs.some(g => gruzReys(g).length > 1);
-  // остаток фуры = сумма остатков её грузов (у груза с перегрузом остаток общий по всем фурам)
-  const profit = gs.reduce((s, g) => s + calc(g).profit, 0);
-  return { rs, gs, kg, m3, common, perKg, share, income, legs, multi, profit };
+  return { rs, gs, kg, m3, common, perKg, share, income, legs, multi, ...finance };
 }
 
 // Остаток прибыли и зарплата по грузу:
 // прибыль до НП = выручка − налог с выручки − свои расходы + НДС своих к вычету − доля общих фур + НДС в доле;
 // НДС к вычету — только если клиент «с НДС», компания на ОСНО и расход «с НДС»;
-// налог на прибыль 25% — ОСНО, не наличные, прибыль в плюсе; зп = 20% от остатка, начисляется после полной оплаты.
-function calc(g) {
+// налог на прибыль — с общей прибыли фуры по компании на ОСНО, не наличные; зп = 20% от остатка, начисляется после полной оплаты.
+function calcBase(g) {
   const rev = num(g.rate_client) || 0;
   const kf = KF[g.pay_form];
   const osno = REGIME[g.company] === 'ОСНО';
@@ -106,14 +151,14 @@ function calc(g) {
   const ownVat = vatOn ? legs.reduce((s, l) => s + vat(l.rate, l.pay_form), 0) + vat(g.other_cost, g.other_form) : 0;
   let share = 0, shareVat = 0;
   for (const r of gruzReys(g)) {
-    const f = fura(r.fura_id), kg = f && furaKg(f);
-    if (!kg) continue;
-    const c = furaCommon(f), w = num(g.kg) || 0;
-    share += w * c.sum / kg;
-    if (vatOn) shareVat += w * c.vat / kg;
+    const f = fura(r.fura_id);
+    if (!f) continue;
+    const c = furaCommon(f), part = furaExpensePart(f, g);
+    share += part * c.sum;
+    if (vatOn) shareVat += part * c.vat;
   }
   const before = rev - nalog - own + ownVat - share + shareVat;
-  const np = osno && g.pay_form !== 'наличные' && before > 0 ? before * NNP : 0;
+  const np = 0;  // Налог начисляется один раз в furaFinance, не по отдельному грузу.
   const profit = before - np;
   const paid = num(g.paid_sum) || 0;
   const payStatus = !rev ? '' : paid >= rev ? 'оплачено' : paid > 0 ? 'частично' : 'не оплачено';
@@ -121,12 +166,25 @@ function calc(g) {
   const zpNach = payStatus === 'оплачено' ? zp : 0;
   const problems = [];
   if (!g.manager) problems.push('нет менеджера');
+  if (osno && g.pay_form !== 'наличные' && rev && !gruzReys(g).length) problems.push('налог на прибыль будет рассчитан после назначения фуры');
   if (rev && !kf) problems.push('нет формы оплаты клиента');
   if (!rev) problems.push('нет ставки клиента');
   if (gruzReys(g).length && !num(g.kg)) problems.push('нет веса — доля фуры 0');
   if (payStatus === 'оплачено' && !g.paid_date) problems.push('оплачено, но нет даты оплаты');
   return { rev, kf, osno, nalog, own, ownVat, share, shareVat, before, np, profit, paid, payStatus,
            debt: Math.max(rev - paid, 0), zp, zpNach, zpWait: zp - zpNach, problems };
+}
+function calc(g) {
+  const base = calcBase(g);
+  const np = gruzReys(g).reduce((sum, r) => {
+    const f = fura(r.fura_id);
+    if (!f) return sum;
+    return sum + (furaFinance(f).entries.find(e => e.g.id === g.id)?.np || 0);
+  }, 0);
+  const profit = base.before - np;
+  const zp = Math.max(profit, 0) * ZP_PCT;
+  const zpNach = base.payStatus === 'оплачено' ? zp : 0;
+  return { ...base, np, profit, zp, zpNach, zpWait: zp - zpNach };
 }
 const gruzProfit = calc;
 
@@ -200,10 +258,12 @@ function viewZayavki() {
 function chainHtml(g) {
   const z = g.legs.zabor || {}, r = g.legs.razvoz || {};
   const accepted = lastLog(g, 'принят на склад');
+  const directPickup = gruzReys(g)[0]?.pickup_mode === 'sender';
+  const pickupLog = lastLog(g, 'забран фурой у отправителя');
   // шаг: [название, текст, дата, пройден?]
   const steps = [
-    ['Забор', `${esc(z.from_addr || g.from_addr || 'адрес не указан')}<br>${esc(z.carrier || '')} ${z.rate ? rub(z.rate) : ''}`, z.dt, !!accepted],
-    ['Склад ' + esc(skName(g.sklad_from) || '?'), accepted ? 'принят' : 'ещё не принят', accepted?.dt, gruzReys(g).length > 0 || g.status === 'доставлен'],
+    [directPickup ? 'Забор фурой у отправителя' : 'Забор', `${esc(z.from_addr || g.from_addr || 'адрес не указан')}<br>${directPickup ? '' : esc(z.carrier || '')} ${!directPickup && z.rate ? rub(z.rate) : ''}`, directPickup ? pickupLog?.dt : z.dt, directPickup ? !!pickupLog : !!accepted],
+    ...(directPickup ? [] : [['Склад ' + esc(skName(g.sklad_from) || '?'), accepted ? 'принят' : 'ещё не принят', accepted?.dt, gruzReys(g).length > 0 || g.status === 'доставлен']]),
   ];
   const rs = gruzReys(g);
   rs.forEach((rr, i) => {
@@ -238,7 +298,7 @@ function zpHtml(g, p) {
       ${line('НДС своих перевозчиков к вычету', p.ownVat, '+ ')}
       ${line('Доля общих расходов фур (по кг)', p.share, '− ')}
       ${line('НДС в доле общих к вычету', p.shareVat, '+ ')}
-      ${line(`Налог на прибыль ${NNP * 100}% (${esc(g.company)} — ОСНО)`, p.np, '− ')}
+      ${line(`Доля налога на общую прибыль фуры (${esc(g.company)} — ОСНО)`, p.np, '− ')}
       <tr><td><b>Остаток прибыли</b></td><td class="num"><b class="${p.profit < 0 ? 'minus' : ''}">${p.profit < 0 ? '− ' : ''}${rub(Math.abs(p.profit))}</b></td></tr>
       <tr><td>Зарплата ${esc(g.manager || 'менеджера')} (${ZP_PCT * 100}% от остатка)</td><td class="num"><b>${rub(p.zp)}</b></td></tr>
       <tr><td>Оплата клиента: <span class="badge ${pay}">${esc(p.payStatus || '—')}</span>${p.debt && p.paid ? ` долг ${rub(p.debt)}` : ''}</td>
@@ -250,7 +310,7 @@ function zpHtml(g, p) {
 
 function legFields(kind, title, l = {}) {
   const f = (k, lab, type = 'text', cls = '') =>
-    `<label class="${cls}">${lab}<input data-leg="${kind}" name="${k}" type="${type}" value="${esc(l[k] ?? '')}"></label>`;
+    `<label class="${cls}">${lab}<input data-leg="${kind}" name="${k}" type="${type}" ${k === 'zayavka' ? 'readonly placeholder="Присвоится при сохранении"' : ''} value="${esc(l[k] ?? '')}"></label>`;
   return `<fieldset><legend>${title}</legend><div class="grid">
     ${f('zayavka', '№ заявки перевозчику')}${f('dt', 'Дата', 'date')}
     ${f('from_addr', 'Откуда', 'text', 'wide')}${f('to_addr', 'Куда', 'text', 'wide')}
@@ -265,6 +325,42 @@ function legFields(kind, title, l = {}) {
     ${f('rate', 'Ставка перевозчику, ₽', 'number')}
     <label>Форма оплаты перевозчику<select data-leg="${kind}" name="pay_form">${formOpts(l.pay_form)}</select></label>
   </div></fieldset>`;
+}
+
+async function openTransport(id, kind, segment = '', draft = null) {
+  const p = await api('document_preview', { id, kind, segment, ...(draft ? { fields: draft } : {}) });
+  const title = kind === 'tn' ? 'Транспортная накладная' : 'Экспедиторская расписка';
+  openModal(`<div class="head"><h2>${title} · проект</h2><button class="x" id="docBack">×</button></div>
+    <p class="muted">${esc(p.notice)}</p>
+    <p><b>${esc(p.company)}</b> · заявка ${esc(p.nomer)}. Отправителя и получателя укажи по документам: заказчик может быть другим лицом.</p>
+    <label>Участок перевозки<select id="docSegment">${opts(p.segments.map(s => [s.id, s.label]), segment, 'выбери участок')}</select></label>
+    <p class="hint">Для каждого участка проверь своего перевозчика, водителя и автомобиль. Переключение участка заново подставляет сведения.</p>
+    <form id="docForm"><div class="grid">${Object.entries(p.labels).map(([k, label]) =>
+      `<label class="wide">${esc(label)}<textarea name="${esc(k)}" rows="2" maxlength="3000">${esc(p.fields[k])}</textarea></label>`).join('')}</div>
+    <p id="docMissing" class="muted"></p>
+    <label><input type="checkbox" id="docIncomplete"> Скачать незаполненный проект, пустые поля дополню в Word</label>
+    <div class="foot"><button type="button" class="btn light" id="docCancel">К заявке</button>
+      <div><button type="button" class="btn light" id="docCheck">Проверить поля</button>
+      <button type="button" class="btn light" id="docOpen">Открыть в Word</button>
+      <button class="btn">Скачать Word</button></div></div></form>`);
+  const fields = () => Object.fromEntries(new FormData($('#docForm')));
+  const showMissing = r => { $('#docMissing').textContent = r.missing.length ? 'Не заполнено: ' + r.missing.join('; ') : 'Основные поля заполнены. Проверь фактические сведения перед оформлением.'; };
+  showMissing(p);
+  $('#docSegment').onchange = () => openTransport(id, kind, $('#docSegment').value);
+  $('#docBack').onclick = $('#docCancel').onclick = () => openGruz(id);
+  $('#docCheck').onclick = async () => showMissing(await api('document_preview', { id, kind, segment: $('#docSegment').value, fields: fields() }));
+  const generate = async open => {
+    const data = { id, kind, segment: $('#docSegment').value, fields: fields(), allow_incomplete: $('#docIncomplete').checked, open };
+    const checked = await api('document_preview', data);
+    showMissing(checked);
+    if (!data.segment) { toast('Выбери участок перевозки', true); return; }
+    if (checked.missing.length && !data.allow_incomplete) { toast('Дополни поля или выбери незаполненный проект', true); return; }
+    const r = await api('print_doc', data);
+    if (!open) { const a = document.createElement('a'); a.href = r.url; a.download = r.file; a.click(); }
+    toast(open ? 'Открываю в Word' : 'Документ готов к скачиванию');
+  };
+  $('#docOpen').onclick = () => generate(true);
+  $('#docForm').onsubmit = e => { e.preventDefault(); generate(false); };
 }
 
 function openGruz(id) {
@@ -309,6 +405,8 @@ function openGruz(id) {
       <button class="btn light" data-print="klient">с клиентом</button>
       <button class="btn light" data-print="zabor">перевозчику — забор</button>
       <button class="btn light" data-print="razvoz">перевозчику — развоз</button>
+      <button class="btn light" data-transport="tn">Транспортная накладная</button>
+      <button class="btn light" data-transport="receipt">Экспедиторская расписка</button>
       <span class="hint">сначала сохраняет карточку</span></div>` : ''}
     <form id="gf">
       <fieldset><legend>Клиент и груз</legend><div class="grid">
@@ -403,6 +501,7 @@ function openGruz(id) {
   });
   form.querySelectorAll('[data-firmfiles]').forEach(b => b.onclick = async () => {
     const target = b.dataset.firmfiles;  // 'client' или отрезок
+    if (target === 'client') return $('#fromZ').onclick();  // заявка клиента: реквизиты + сумма, вес, адреса
     const gid = (await api('gruz_save', collect())).id;
     openFirma(null, async fm => {
       const g2 = gruzById(gid);
@@ -434,6 +533,10 @@ function openGruz(id) {
     const r = await api('print_doc', { kind: b.dataset.print, id });
     toast('Открываю в Word: ' + r.file);
     openGruz(id);
+  });
+  $('#modalBox').querySelectorAll('[data-transport]').forEach(b => b.onclick = async () => {
+    await api('gruz_save', collect());
+    await openTransport(id, b.dataset.transport);
   });
   if ($('#del')) $('#del').onclick = async () => {
     if (!confirm(`Удалить ${g.nomer} совсем? Вернуть будет нельзя.`)) return;
@@ -526,16 +629,19 @@ function viewFury() {
 
 function openFuraForm(id) {
   const f = id ? fura(id) : { cap_m3: 82, cap_t: 20, route: [], sklad_from: S.sklady[0]?.id };
-  const v = (k, lab, type = 'text') => `<label>${lab}<input name="${k}" type="${type}" ${type === 'number' ? 'step="any"' : ''} value="${esc(f[k] ?? '')}"></label>`;
+  const v = (k, lab, type = 'text') => `<label>${lab}<input name="${k}" type="${type}" ${k === 'zayavka' ? 'readonly placeholder="Присвоится при сохранении"' : ''} ${type === 'number' ? 'step="any"' : ''} value="${esc(f[k] ?? '')}"></label>`;
   let route = [...f.route];
   openModal(`
     <div class="head"><h2>${id ? 'Фура ' + esc(f.nomer_ts) : 'Новая фура'}</h2><button class="x" data-close>×</button></div>
     <form id="ff"><div class="grid">
-      ${v('nomer_ts', 'Номер машины')}${v('carrier', 'Перевозчик')}
+      ${v('nomer_ts', 'Номер машины')}
       <label>Водитель — из справочника или текстом
         <span style="display:flex;gap:6px"><input name="driver" list="vodList" value="${esc(f.driver ?? '')}" style="flex:1">
         <button type="button" class="btn small light" id="vodFiles">из файлов</button></span>
         <input type="hidden" name="voditel_id" value="${esc(f.voditel_id ?? '')}"></label>
+      ${furaDriverEditor(vodById(f.voditel_id))}
+      ${carrierEditor(f)}
+      <div class="full carrier-upload"><button type="button" class="btn small light" id="carrierFiles">Реквизиты перевозчика из карточки</button></div>
       ${vodDatalist()}${v('zayavka', '№ заявки перевозчику')}
       <label>Объём кузова<select name="cap_m3">${opts([[82, '82 м³'], [110, '110 м³']], f.cap_m3, null)}</select></label>
       ${v('cap_t', 'Грузоподъёмность, т', 'number')}${v('rate', 'Ставка фуры, ₽', 'number')}
@@ -559,17 +665,28 @@ function openFuraForm(id) {
   drawRoute();
   $('#rtAdd').onchange = e => { if (e.target.value) route.push(+e.target.value); e.target.value = ''; drawRoute(); };
   const collectF = () => {
-    const d = { id, route };
+    const d = { id, route, carrier_details: collectCarrier($('#ff')) };
+    if ($('#ff').querySelector('[name=voditel_id]').value || $('#ff').querySelector('[name=driver_fio]').value.trim() || $('#ff').querySelector('[name=driver_auto_plate]').value.trim()) {
+      d.driver_details = {};
+      VOD_GROUPS.flatMap(([, fields]) => fields).forEach(([k]) => d.driver_details[k] = $('#ff').querySelector(`[name="driver_${k}"]`).value.trim());
+    }
     $('#ff').querySelectorAll('[name]').forEach(i => d[i.name] = i.value);
-    for (const k of ['cap_m3', 'cap_t', 'rate', 'sklad_from', 'sklad_load', 'sklad_unload', 'other', 'voditel_id']) d[k] = num(d[k]);
+    for (const k of ['cap_m3', 'cap_t', 'rate', 'sklad_from', 'sklad_load', 'sklad_unload', 'other', 'voditel_id', 'carrier_id']) d[k] = num(d[k]);
     if (id && f.status !== 'собирается') d.sklad_from = f.sklad_from;
     d.dt_out = f.dt_out || '';
     return d;
   };
   const ff = $('#ff');
-  const setVod = v => {  // водитель из справочника: id, перевозчик и номер машины — если пусто
+  bindCarrier(ff);
+  const setVod = v => {  // выбор существующего водителя заменяет данные только по явному выбору
+    if (!v) { ff.querySelector('[name=driver_fio]').value = ff.querySelector('[name=driver]').value; return; }
     ff.querySelector('[name=voditel_id]').value = v ? v.id : '';
-    if (v && v.carrier && !ff.querySelector('[name=carrier]').value) ff.querySelector('[name=carrier]').value = v.carrier;
+    if (v) VOD_GROUPS.flatMap(([, fields]) => fields).forEach(([k]) => { ff.querySelector(`[name="driver_${k}"]`).value = v[k] || ''; });
+    if (v && v.carrier && !ff.querySelector('[name=carrier]').value) {
+      ff.querySelector('[name=carrier]').value = v.carrier;
+      ff.querySelector('[name=carrier_inn]').value = v.carrier_inn || '';
+      ff.querySelector('[name=carrier_inn]').dispatchEvent(new Event('change'));
+    }
     if (v && v.auto_plate && !ff.querySelector('[name=nomer_ts]').value) ff.querySelector('[name=nomer_ts]').value = v.auto_plate;
   };
   ff.querySelector('[name=driver]').onchange = e => setVod(S.voditeli.find(x => vodLabel(x) === e.target.value));
@@ -577,9 +694,17 @@ function openFuraForm(id) {
     const fid = (await api('fura_save', collectF())).id;
     openVoditel(null, async v => {
       const f2 = fura(fid);
-      await api('fura_save', { ...f2, driver: vodLabel(v), voditel_id: v.id, carrier: f2.carrier || v.carrier,
+      await api('fura_save', { ...f2, driver: vodLabel(v), voditel_id: v.id, carrier: f2.carrier || v.carrier, carrier_id: f2.carrier_id || carrierCard(v)?.id || null,
         nomer_ts: f2.nomer_ts || v.auto_plate }, 'Водитель подставлен в фуру');
       openFura(fid);
+    }, () => openFuraForm(fid));
+  };
+  $('#carrierFiles').onclick = async () => {
+    const fid = (await api('fura_save', collectF())).id;
+    const current = fura(fid);
+    openFirma(current.carrier_id || null, async company => {
+      if (company) await api('fura_save', { id: fid, carrier: company.name, carrier_id: company.id }, 'Перевозчик сохранён');
+      openFuraForm(fid);
     }, () => openFuraForm(fid));
   };
   ff.onsubmit = async e => {
@@ -597,6 +722,8 @@ function openFura(id) {
   const f = fura(id); if (!f) return closeModal();
   const c = furaCalc(f);
   const canLoad = f.status === 'собирается';
+  const canPickup = ['собирается', 'в пути'].includes(f.status);
+  const atSender = S.gruzy.filter(g => g.status === 'ждёт забора' && !g.fura_id && !gruzReys(g).some(r => r.fura_id === f.id));
   const onSklad = S.gruzy.filter(g => g.status === 'на складе' && g.sklad_id === f.sklad_from
     && !gruzReys(g).some(r => r.fura_id === f.id));
   const riding = c.rs.filter(r => r.g.status === 'в фуре' && r.g.fura_id === f.id);   // ещё в этой фуре
@@ -618,37 +745,48 @@ function openFura(id) {
       ${noPoint.length ? `<span class="minus">У ${noPoint.length} гр. точка выгрузки не из маршрута фуры — выберите в таблице.</span>` : ''}
     </div>
 
+    <p><b>Прибыль фуры до налога:</b> ${rub(c.before)} · <b>Налог на прибыль:</b> ${rub(c.np)} · <b>После налога:</b> ${rub(c.profit)}</p>
+    <p class="hint">Налог ${NNP * 100}% считается один раз с общей положительной прибыли фуры после расходов, отдельно по компании на ОСНО. Убыточные грузы уменьшают общую базу своей компании. В строках грузов показана доля уже рассчитанного налога.</p>
     <h3>В фуре: ${c.gs.length} грузов · ${n1(c.kg, 0)} кг · ${n1(c.m3)} м³ · 1 кг = ${n1(c.perKg)} ₽</h3>
     ${c.gs.length ? `<table><thead><tr><th>№</th><th>Клиент</th><th>Груз</th><th class="num">кг</th><th class="num">м³</th>
       <th>Выгрузка</th><th>Статус</th><th class="num">Клиент</th><th class="num">Забор+развоз</th><th class="num">Доля фуры</th><th class="num">Остаток</th><th></th></tr></thead>
-      <tbody>${c.rs.map(({ g, point }) => {
-        const sh = c.share(g), pr = gruzProfit(g).profit, multi = gruzReys(g).length > 1;
+      <tbody>${c.rs.map(({ g, point, pickup_mode, pickup_address }) => {
+        const sh = c.share(g), part = c.rs.find(e => e.g.id === g.id), pr = part.profit, multi = gruzReys(g).length > 1;
         const pointOk = f.route.includes(point), here = g.status === 'в фуре' && g.fura_id === f.id;
         const transit = point && g.sklad_to && point !== g.sklad_to;
-        return `<tr data-id="${g.id}"><td><a href="#" data-open="${g.id}">${esc(g.nomer)}</a></td><td>${esc(g.client)}</td><td>${esc(g.cargo)}</td>
+        return `<tr data-id="${g.id}"><td><a href="#" data-open="${g.id}">${esc(g.nomer)}</a></td><td>${esc(g.client)}</td><td>${esc(g.cargo)}${pickup_mode === 'sender' ? `<div class="hint">Забор у отправителя: ${esc(pickup_address)}</div>` : ''}</td>
           <td class="num${g.kg ? '' : ' gap'}">${n1(g.kg, 0)}</td><td class="num">${n1(g.m3)}</td>
           <td class="${pointOk ? '' : 'gap'}">${here
             ? `<select data-point="${g.id}">${opts(f.route.map(s => [s, skName(s) + (s === g.sklad_to ? '' : ' (перегруз)')]), pointOk ? point : '', 'не указано')}</select>`
             : esc(skName(point))}${transit ? `<div class="hint">дальше на ${esc(skName(g.sklad_to))}</div>` : ''}</td>
-          <td>${here ? badge(g.status) : '<span class="badge st-dost">выгружен</span>'}</td><td class="num">${rub(g.rate_client)}</td><td class="num">${rub(legsSum(g))}</td>
+          <td>${here ? badge(g.status) : '<span class="badge st-dost">выгружен</span>'}</td><td class="num">${rub(part.rev)}</td><td class="num">${rub(part.legs)}</td>
           <td class="num">${rub(sh)}</td><td class="num${pr < 0 ? ' minus' : ''}">${rub(pr)}${multi ? '*' : ''}</td>
           <td>${canLoad ? `<button class="btn small light" data-rm="${g.id}">убрать</button>` : ''}</td></tr>`;
       }).join('')}</tbody>
       <tfoot><tr><td colspan="7">Итого (фура ${rub(f.rate)})</td><td class="num">${rub(c.income)}</td><td class="num">${rub(c.legs)}</td>
         <td class="num">${rub(c.gs.reduce((s, g) => s + c.share(g), 0))}</td><td class="num">${rub(c.profit)}</td><td></td></tr></tfoot></table>
-      <p class="hint">Доля фуры = вес груза × стоимость 1 кг; 1 кг = (фура + склады + прочие общие) / вес фуры. Груз без веса (жёлтый) доли не получает.
+      <p class="hint">Доля фуры = вес груза × стоимость 1 кг; 1 кг = (фура + склады + прочие общие) / вес фуры. Если веса всех грузов не указаны, общие расходы временно делятся поровну.
         Остаток — после налогов (НДС/УСН, налог на прибыль у ОСНО), разбор — в карточке груза.
-        ${c.multi ? '<br>* Груз едет несколькими фурами (перегруз) — остаток по нему общий: минус доли всех его фур.' : ''}</p>`
+        ${c.multi ? '<br>* При перегрузе доход и свои расходы распределены между фурами по долям общих расходов; если расходы нулевые — поровну. Данные не учитываются дважды.' : ''}</p>`
       : '<div class="empty">Фура пустая.</div>'}
 
     ${canLoad ? `<h3>Можно погрузить со склада ${esc(skName(f.sklad_from))}: ${onSklad.length}</h3>
       ${onSklad.length ? `<table><thead><tr><th></th><th>№</th><th>Клиент</th><th>Груз</th><th class="num">кг</th><th class="num">м³</th><th>Склад назначения</th></tr></thead>
         <tbody>${onSklad.map(g => `<tr><td><input type="checkbox" data-pick="${g.id}"></td><td>${esc(g.nomer)}</td><td>${esc(g.client)}</td>
-          <td>${esc(g.cargo)}</td><td class="num">${n1(g.kg, 0)}</td><td class="num">${n1(g.m3)}</td>
+          <td>${esc(g.cargo)}${pickup_mode === 'sender' ? `<div class="hint">Забор у отправителя: ${esc(pickup_address)}</div>` : ''}</td><td class="num">${n1(g.kg, 0)}</td><td class="num">${n1(g.m3)}</td>
           <td class="${f.route.includes(g.sklad_to) ? '' : 'gap'}">${esc(skName(g.sklad_to) || 'не указан')}</td></tr>`).join('')}</tbody></table>
         <div class="bar" style="margin-top:8px"><span id="pickInfo" class="muted">Отметьте грузы галочками</span><span class="grow"></span>
           <button class="btn" id="load" disabled>Погрузить отмеченные</button></div>`
         : '<div class="empty">На складе погрузки нет свободных грузов.</div>'}` : ''}
+    ${canPickup ? `<h3>Забор фурой у отправителя — без склада</h3>
+      <p class="hint">Выберите грузы по адресам отправителей. После фактического забора они окажутся в фуре без приёмки на складе.</p>
+      ${atSender.length ? `<table><thead><tr><th></th><th>№</th><th>Клиент</th><th>Адрес забора</th><th class="num">кг</th><th>Склад назначения</th></tr></thead>
+      <tbody>${atSender.map(g => `<tr><td><input type="checkbox" data-directpick="${g.id}" ${g.legs.zabor?.from_addr || g.from_addr ? '' : 'disabled'}></td>
+        <td>${esc(g.nomer)}</td><td>${esc(g.client)}</td><td>${esc(g.legs.zabor?.from_addr || g.from_addr || 'Сначала укажите адрес в заявке')}</td>
+        <td class="num">${n1(g.kg, 0)}</td><td>${esc(skName(g.sklad_to) || 'не указан')}</td></tr>`).join('')}</tbody></table>
+      <div class="bar" style="margin-top:8px"><label>Дата забора <input id="directDt" type="date" value="${S.today}"></label>
+        <button type="button" class="btn" id="directLoad" disabled>Забрали у отправителя — загрузить в фуру</button></div>`
+      : '<div class="empty">Нет грузов, ожидающих забора у отправителя.</div>'}` : ''}
     <div class="foot"><span></span><button class="btn light" data-close>Закрыть</button></div>`);
 
   $('#edit').onclick = e => { e.preventDefault(); openFuraForm(id); };
@@ -658,7 +796,7 @@ function openFura(id) {
   };
   const box = $('#modalBox');
   box.querySelectorAll('[data-open]').forEach(a => a.onclick = e => { e.preventDefault(); openGruz(+a.dataset.open); });
-  box.querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => { await api('fura_remove', { fura_id: id, gruz_id: +b.dataset.rm }, 'Убран на склад'); openFura(id); });
+  box.querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => { await api('fura_remove', { fura_id: id, gruz_id: +b.dataset.rm }, 'Груз возвращён в исходное место'); openFura(id); });
   box.querySelectorAll('[data-point]').forEach(s => s.onchange = async () => {
     await api('reys_point', { gruz_id: +s.dataset.point, fura_id: id, point: num(s.value) }, 'Точка выгрузки сохранена'); openFura(id);
   });
@@ -670,6 +808,13 @@ function openFura(id) {
     const r = await api('fura_unload', { fura_id: id, sklad_id: +b.dataset.unload, dt: $('#dt').value });
     toast(`Выгружено ${r.unloaded}, осталось в фуре ${r.left}`); openFura(id);
   });
+  const directPicks = [...box.querySelectorAll('[data-directpick]')];
+  directPicks.forEach(p => p.onchange = () => $('#directLoad').disabled = !directPicks.some(p => p.checked));
+  if ($('#directLoad')) $('#directLoad').onclick = async () => {
+    await api('fura_add', { fura_id: id, pickup_mode: 'sender', dt: $('#directDt').value,
+      gruz_ids: directPicks.filter(p => p.checked).map(p => +p.dataset.directpick) }, 'Грузы забраны у отправителей');
+    openFura(id);
+  };
   const picks = [...box.querySelectorAll('[data-pick]')];
   const upd = () => {
     const sel = onSklad.filter(g => picks.find(p => p.checked && +p.dataset.pick === g.id));
@@ -903,7 +1048,6 @@ const VOD_GROUPS = [
   ['Водительское удостоверение', [['vu', 'Номер'], ['vu_date', 'Дата выдачи'], ['vu_until', 'Действует до'], ['vu_cats', 'Категории']]],
   ['Тягач / автомобиль', [['auto_brand', 'Марка, модель'], ['auto_plate', 'Госномер'], ['auto_sts', 'СТС']]],
   ['Полуприцеп', [['trailer_brand', 'Марка'], ['trailer_plate', 'Госномер'], ['trailer_sts', 'СТС']]],
-  ['Перевозчик (чья машина)', [['carrier', 'Перевозчик', 'wide'], ['carrier_inn', 'ИНН']]],
 ];
 
 function viewVoditeli() {
@@ -926,7 +1070,7 @@ function viewVoditeli() {
 // ----- общее для окон «из файлов»: зона перетаскивания, выбор файлов, Ctrl+V → /api/raspoznat -----
 const DROP_HTML = hint => `<div id="drop" class="drop">Перетащите сюда ${hint}<br>или <a href="#" id="pick">выберите файлы</a>,
   или скопируйте картинку и нажмите <b>Ctrl+V</b><input id="fileIn" type="file" multiple hidden
-  accept=".jpg,.jpeg,.jfif,.png,.webp,.bmp,.pdf,.docx"></div><div id="ocrState" class="hint"></div><div id="thumbs"></div>`;
+  accept=".jpg,.jpeg,.jfif,.png,.webp,.bmp,.pdf,.docx,.xlsx,.xlsm,.xls"></div><div id="ocrState" class="hint"></div><div id="thumbs"></div>`;
 const fileUrl = p => '/files/' + p.split('/').map(encodeURIComponent).join('/');
 const isImg = p => /\.(jpe?g|jfif|png|webp|bmp)$/i.test(p);
 
@@ -989,12 +1133,14 @@ function openVoditel(id, onSaved, onClose) {
       <form id="vf" class="vodform">
         ${VOD_GROUPS.map(([g, fields]) => `<fieldset><legend>${g}</legend><div class="grid">${fields.map(([k, lab, cls]) =>
           `<label class="${cls || ''}">${lab}<input name="${k}" value="${esc(v[k] || '')}"></label>`).join('')}</div></fieldset>`).join('')}
+        ${carrierEditor(v)}
         <label class="full" style="display:flex;flex-direction:column;font-size:12px;color:var(--muted)">Примечание
           <textarea name="note" rows="2">${esc(v.note || '')}</textarea></label>
         <div class="foot"><div>${id ? '<button type="button" class="btn red" id="del">Удалить водителя</button>' : ''}</div>
           <div><button type="button" class="btn light" data-close>Закрыть</button> <button class="btn">Сохранить${onSaved ? ' и подставить в заявку' : ''}</button></div></div>
       </form>
     </div>`);
+  bindCarrier($('#vf'));
   if (onClose) $('#modalBox').querySelectorAll('[data-close]').forEach(b => b.onclick = () => onClose());
 
   const drawThumbs = docs => {
@@ -1016,7 +1162,7 @@ function openVoditel(id, onSaved, onClose) {
 
   $('#vf').onsubmit = async e => {
     e.preventDefault();
-    const d = { id, files };
+    const d = { id, files, carrier_details: collectCarrier($('#vf')) };
     $('#vf').querySelectorAll('[name]').forEach(i => d[i.name] = i.value.trim());
     if (!id) {  // такой водитель уже есть? — обновим его, а не заведём второго
       const norm = s => (s || '').replace(/\s/g, '').toLowerCase();
@@ -1076,7 +1222,7 @@ function openFirma(id, onSaved, onClose, opt = {}) {
   openModal(`
     <div class="head"><h2>${zmode ? 'Заполнить груз из заявки клиента' : id ? esc(f.name || 'Контрагент') : 'Новый контрагент из файлов'}</h2><button class="x" data-close>×</button></div>
     <div class="vodwrap">
-      <div class="vodfiles">${DROP_HTML(zmode ? 'заявку клиента (PDF, фото, Word)' : 'карточку предприятия или заявку клиента (PDF, фото, Word)')}<div id="cands"></div></div>
+      <div class="vodfiles">${DROP_HTML(zmode ? 'заявку клиента (PDF, фото, Word, Excel)' : 'карточку предприятия или заявку клиента (PDF, фото, Word, Excel)')}<div id="cands"></div></div>
       <form id="kf" class="vodform">
         ${zmode ? `<fieldset><legend>Груз из заявки — подставится только в пустые поля карточки груза</legend><div class="grid">${GRUZ_FROM_Z.map(([k, lab, cls, type]) =>
           k === 'pay_form' ? `<label>${lab}<select name="z_${k}">${formOpts('')}</select></label>`
@@ -1180,9 +1326,9 @@ function viewNastr() {
   });
   $('#madd').onclick = () => api('manager_save', { name: $('#mn').value }, 'Добавлено');
 
-  // вход в приложение: смена пароля (блокнот на рабочем столе обновится сам) и выход
+  // вход в приложение: смена пароля текущего пользователя и выход
   $('#view').insertAdjacentHTML('beforeend', `<h2 style="margin-top:24px">Вход в приложение</h2>
-    <p class="hint">Логин и пароль — в блокноте «Склад ВЛ — вход» на рабочем столе. После смены пароля блокнот обновится, войти нужно будет заново.</p>
+    <p class="hint">Здесь меняется пароль текущей учётной записи. После смены потребуется войти заново.</p>
     <div class="bar"><input id="pwOld" type="password" placeholder="Старый пароль" autocomplete="current-password">
       <input id="pwNew" type="password" placeholder="Новый пароль (от 8 символов)" autocomplete="new-password">
       <button class="btn" id="pwGo">Сменить пароль</button><span class="grow"></span>
@@ -1192,7 +1338,7 @@ function viewNastr() {
       body: JSON.stringify({ old: $('#pwOld').value, new: $('#pwNew').value }) });
     const res = await r.json();
     if (!r.ok) return toast(res.error || 'Не удалось', true);
-    toast('Пароль изменён, блокнот обновлён'); setTimeout(() => location.href = '/login', 1200);
+    toast('Ваш пароль изменён. Войдите заново'); setTimeout(() => location.href = '/login', 1200);
   };
   $('#logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login'; };
   $('#view').querySelectorAll('[data-save]').forEach(b => b.onclick = () => {
@@ -1216,3 +1362,60 @@ $('#modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') cl
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
 
 load();
+
+// Полные реквизиты хранятся в общей карточке контрагента, отдельно от личных данных водителя.
+function carrierCard(value, inn = '') {
+  if (value?.carrier_id) return firmById(value.carrier_id);
+  const key = inn || value?.carrier_inn;
+  const matches = S.firmy.filter(c => key ? c.inn === key : c.name === value?.carrier);
+  return matches.length === 1 ? matches[0] : null;
+}
+function carrierEditor(value) {
+  const c = carrierCard(value) || {};
+  return `<fieldset class="full"><legend>Перевозчик — полные реквизиты</legend>
+    <input type="hidden" name="carrier_id" value="${esc(c.id || '')}">
+    <div class="grid">${FIRM_GROUPS.flatMap(([, fields]) => fields).map(([k, lab, cls]) => {
+      const name = k === 'name' ? 'carrier' : k === 'inn' ? 'carrier_inn' : 'carrier_' + k;
+      const val = c[k] ?? (k === 'name' ? value.carrier : k === 'inn' ? value.carrier_inn : '') ?? '';
+      return `<label class="${cls || ''}">${lab}<input name="${name}" ${k === 'name' ? 'list="carrierList"' : ''} value="${esc(val)}"></label>`;
+    }).join('')}</div><datalist id="carrierList">${S.firmy.map(c => `<option value="${esc(c.name)}">ИНН ${esc(c.inn)}</option>`).join('')}</datalist>
+    <p class="hint">Сохраняются в справочнике контрагентов и используются в заявке перевозчику.</p></fieldset>`;
+}
+function collectCarrier(form) {
+  const d = {};
+  FIRM_GROUPS.flatMap(([, fields]) => fields).forEach(([k]) => {
+    const name = k === 'name' ? 'carrier' : k === 'inn' ? 'carrier_inn' : 'carrier_' + k;
+    d[k] = form.querySelector(`[name="${name}"]`)?.value.trim() || '';
+  });
+  return d;
+}
+function bindCarrier(form) {
+  const fill = c => {
+    form.querySelector('[name=carrier_id]').value = c?.id || '';
+    FIRM_GROUPS.flatMap(([, fields]) => fields).forEach(([k]) => {
+      const name = k === 'name' ? 'carrier' : k === 'inn' ? 'carrier_inn' : 'carrier_' + k;
+      if (k !== 'name') form.querySelector(`[name="${name}"]`).value = c?.[k] || '';
+    });
+  };
+  form.querySelector('[name=carrier]').onchange = e => {
+    const matches = S.firmy.filter(c => c.name === e.target.value.trim());
+    if (matches.length === 1) fill(matches[0]);
+    else form.querySelector('[name=carrier_id]').value = '';
+  };
+  form.querySelector('[name=carrier_inn]').onchange = e => {
+    const matches = S.firmy.filter(c => c.inn === e.target.value.trim());
+    if (matches.length === 1) {
+      form.querySelector('[name=carrier]').value = matches[0].name;
+      fill(matches[0]);
+    } else form.querySelector('[name=carrier_id]').value = '';
+  };
+}
+
+function furaDriverEditor(driver) {
+  const v = driver || {};
+  return `<fieldset class="full"><legend>Данные водителя и машины</legend>
+    <p class="hint">Сохранённые данные остаются в полях. Меняйте только то, что нужно исправить.</p>
+    <div class="driver-sections">${VOD_GROUPS.map(([group, fields]) => `<fieldset class="${group === 'Паспорт' ? 'passport-section' : ''}"><legend>${group}</legend><div class="grid">${fields.map(([k, label, cls]) =>
+      `<label class="${cls || ''}">${label}<input name="driver_${k}" value="${esc(v[k] || '')}"></label>`).join('')}</div></fieldset>`).join('')}</div>
+  </fieldset>`;
+}

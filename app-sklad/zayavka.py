@@ -23,11 +23,13 @@ def iso(d):
 def unloading(lines):
     """Как K.loading, только для выгрузки: дата и место."""
     date = place = ''
+    explicit_address = re.compile(r'адрес[^\n]{0,25}(?:выгрузк|разгрузк|доставк)', re.I)
+    has_address = any(explicit_address.search(line) for line in lines)
     for i, l in enumerate(lines):
         low = l.lower()
         if not date and re.search(r'(дата|время|срок)[^\n]{0,25}(выгрузк|разгрузк|доставк)|(выгрузк|разгрузк)[^\n]{0,15}(дата|:)', low):
             date = K.find_date(' '.join(lines[i:i + 3]))
-        if not place and UNLOAD_LABEL.search(l):
+        if not place and (not has_address or explicit_address.search(l)) and UNLOAD_LABEL.search(l):
             rest = re.split(r'(?:выгрузк|разгрузк|доставк)\S*', l, maxsplit=1, flags=re.I)[-1]
             rest = re.sub(r'^[\s:.\-1)]+', '', rest).rstrip(' :-')
             cand = rest if len(re.findall(r'[А-Яа-яЁё]{3,}', rest)) >= 2 and not NOT_PLACE.match(rest) else ''
@@ -59,9 +61,19 @@ def cargo(text, lines):
         if 3 <= len(val) <= 80 and not re.match(r'(вес|масса|объ|кол|адрес|дата|отправ|получ)', val, re.I):
             r['cargo'] = val
             break
+    labelled_weight = re.search(r'\b(?:вес|масса)\s*\(\s*(тонн\w*|т|кг)\s*\)\s*[:=]?\s*(\d+(?:[.,]\d+)?)', text, re.I)
+    if labelled_weight:
+        value = _num(labelled_weight[2]) * (1 if labelled_weight[1].lower() == 'кг' else 1000)
+        if 0 < value <= 60000:
+            r['kg'] = round(value, 3)
+    labelled_volume = re.search(r'объ[её]м\s*\(\s*м[3³]\s*\)\s*[:=]?\s*(\d+(?:[.,]\d+)?)', text, re.I)
+    if labelled_volume:
+        value = _num(labelled_volume[1])
+        if 0 < value <= 130:
+            r['m3'] = value
     w = re.search(r'(?:вес|масса)[^\d\n]{0,25}(\d[\d\s]{0,6}(?:[.,]\d+)?)\s*(кг|т\b|тн|тонн)', text, re.I) or \
         re.search(r'(\d[\d\s]{0,6}(?:[.,]\d+)?)\s*(кг|тн|тонн)\b', text, re.I)
-    if w:
+    if w and 'kg' not in r:
         v = _num(w.group(1))
         kg = v if w.group(2).lower() == 'кг' else v * 1000
         if 1 <= kg <= 60000:

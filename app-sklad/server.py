@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import ipaddress
 import sys
 import threading
 import webbrowser
@@ -16,11 +17,31 @@ HERE = Path(__file__).resolve().parent
 DB = Path(os.environ.get('SKLAD_DB') or HERE / 'sklad.db')   # SKLAD_DB / SKLAD_PORT — для проверки на копии
 STATIC = HERE / 'static'
 PORT = int(os.environ.get('SKLAD_PORT') or 8765)
+NETWORK_FILE = HERE / 'network.json'
+NETWORK = json.loads(NETWORK_FILE.read_text(encoding='utf-8-sig')) if NETWORK_FILE.exists() else {}
+LAN_SUBNET = ipaddress.ip_network(NETWORK['subnet']) if NETWORK.get('enabled') else None
+BIND_HOST = '0.0.0.0' if LAN_SUBNET is not None else '127.0.0.1'
+
+
+def network_peer_allowed(address, subnet=LAN_SUBNET):
+    try:
+        peer = ipaddress.ip_address(address)
+        return peer.is_loopback or (subnet is not None and peer in subnet)
+    except ValueError:
+        return False
+
+
+class WarehouseHTTPServer(ThreadingHTTPServer):
+    def verify_request(self, request, client_address):
+        return network_peer_allowed(client_address[0])
+
+
 
 SKLADY = ['Щёлково', 'Красноярск', 'Иркутск', 'Улан-Удэ', 'Чита']  # слова владельца, 2026-11-02
-MANAGERS = ['Александр', 'Артём', 'Таня', 'Ильяс', 'Оля', 'Андрей', 'Илья']  # логисты из плана зп с прибыли по фуре
+MANAGERS = ['Александр', 'Артём', 'Таня', 'Ильяс', 'Оля', 'Андрей', 'Илья', 'Константин']  # логисты из плана зп с прибыли по фуре
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS document_sequence(kind TEXT PRIMARY KEY, last_value INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS sklad(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, address TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS gruz(
@@ -78,6 +99,8 @@ CREATE TABLE IF NOT EXISTS log(                  -- история движен�
 # Поля, добавленные после первой версии (в новой базе создаются сразу, в старую дописываются в init_db).
 # Формы оплаты — текстом: «с НДС» (1,22), «без НДС» (1,06), «наличные» (1) — как в таблице зп с прибыли по фуре.
 NEW_COLS = {
+    'reys': {'pickup_mode': "TEXT DEFAULT 'warehouse'", 'pickup_address': "TEXT DEFAULT ''",
+             'pickup_status': "TEXT DEFAULT ''", 'pickup_sklad': 'INTEGER'},
     'gruz': {'manager': "TEXT DEFAULT ''", 'client_id': 'INTEGER',          # заказчик из справочника контрагентов
              'other_cost': 'REAL', 'other_form': "TEXT DEFAULT ''",          # прочие свои расходы (СДЭК, кран)
              'paid_sum': 'REAL', 'paid_date': "TEXT DEFAULT ''",             # оплата клиента — для начисления зп
@@ -85,7 +108,7 @@ NEW_COLS = {
              'paid_manual': 'REAL'},                                         # часть оплаты, введённая руками до выписки
     'leg': {'pay_form': "TEXT DEFAULT ''",                                   # форма оплаты перевозчика
             'voditel_id': 'INTEGER', 'carrier_id': 'INTEGER'},               # водитель и перевозчик из справочников
-    'fura': {'voditel_id': 'INTEGER', 'rate_form': "TEXT DEFAULT ''",
+    'fura': {'carrier_id': 'INTEGER', 'voditel_id': 'INTEGER', 'rate_form': "TEXT DEFAULT ''",
              'sklad_load': 'REAL', 'sklad_load_form': "TEXT DEFAULT ''",     # общие расходы фуры: склад погрузки,
              'sklad_unload': 'REAL', 'sklad_unload_form': "TEXT DEFAULT ''",  # склад приёмки,
              'other': 'REAL', 'other_form': "TEXT DEFAULT ''"},              # прочие общие
@@ -101,7 +124,7 @@ VODITEL_FIELDS = ['fio', 'phone', 'birth_date', 'passport', 'passport_issued_by'
                   'vu', 'vu_date', 'vu_until', 'vu_cats', 'auto_brand', 'auto_plate', 'auto_sts',
                   'trailer_brand', 'trailer_plate', 'trailer_sts', 'carrier', 'carrier_inn', 'note']
 FILES = HERE / 'files'  # оригиналы документов водителей (не в git)
-FURA_FIELDS = ['nomer_ts', 'carrier', 'driver', 'voditel_id', 'zayavka', 'dt_out', 'sklad_from', 'route',
+FURA_FIELDS = ['carrier_id', 'nomer_ts', 'carrier', 'driver', 'voditel_id', 'zayavka', 'dt_out', 'sklad_from', 'route',
                'cap_m3', 'cap_t', 'rate', 'note', 'rate_form', 'sklad_load', 'sklad_load_form',
                'sklad_unload', 'sklad_unload_form', 'other', 'other_form']
 
@@ -120,6 +143,15 @@ def connect():
 def init_db():
     con = connect()
     con.executescript(SCHEMA)
+    # Старые номера не меняем; счетчики продолжают уже использованные значения.
+    for kind, query, pattern in [
+        ('client', 'SELECT nomer FROM gruz', r'^(?:Г|К)-(\d+)$'),
+        ('carrier', 'SELECT zayavka FROM leg UNION ALL SELECT zayavka FROM fura', r'^П-(\d+)$'),
+    ]:
+        values = [int(m[1]) for row in con.execute(query) if (m := re.fullmatch(pattern, row[0] or ''))]
+        con.execute('INSERT INTO document_sequence(kind,last_value) VALUES (?,?) '
+                    'ON CONFLICT(kind) DO UPDATE SET last_value=max(document_sequence.last_value,excluded.last_value)',
+                    (kind, max(values, default=0)))
     # перевод базы фазы 1: одна фура на груз → таблица рейсов
     if 'parent_id' not in [r[1] for r in con.execute('PRAGMA table_info(gruz)')]:
         con.execute('ALTER TABLE gruz ADD COLUMN parent_id INTEGER')
@@ -180,8 +212,16 @@ def state(con):
 
 # ---------- действия ----------
 
+def next_request_number(con, kind):
+    value = con.execute('INSERT INTO document_sequence(kind,last_value) VALUES (?,1) '
+                        'ON CONFLICT(kind) DO UPDATE SET last_value=last_value+1 RETURNING last_value',
+                        (kind,)).fetchone()[0]
+    return f'{"К" if kind == "client" else "П"}-{value:04d}'
+
+
 def gruz_save(con, d):
-    vals = {k: d.get(k) for k in GRUZ_FIELDS}
+    previous = one(con, 'SELECT * FROM gruz WHERE id=?', d['id']) if d.get('id') else {}
+    vals = {k: d[k] if k in d else previous[k] if k in previous.keys() else None for k in GRUZ_FIELDS}
     if d.get('id'):
         gid = d['id']
         con.execute('UPDATE gruz SET ' + ', '.join(f'{k}=?' for k in vals) + ' WHERE id=?', [*vals.values(), gid])
@@ -189,10 +229,16 @@ def gruz_save(con, d):
         cur = con.execute('INSERT INTO gruz(created, ' + ', '.join(vals) + ') VALUES (?' + ',?' * len(vals) + ')',
                           [today(), *vals.values()])
         gid = cur.lastrowid
-        con.execute('UPDATE gruz SET nomer=? WHERE id=?', (f'Г-{gid:04d}', gid))
+        con.execute('UPDATE gruz SET nomer=? WHERE id=?', (next_request_number(con, 'client'), gid))
     paid_recalc(con, gid)  # есть платежи из выписки — оплата считается из них, а не из поля
     for kind, leg in (d.get('legs') or {}).items():
-        lv = {k: leg.get(k) for k in LEG_FIELDS}
+        previous_leg = con.execute('SELECT * FROM leg WHERE gruz_id=? AND kind=?', (gid, kind)).fetchone()
+        lv = {k: leg[k] if k in leg else previous_leg[k] if previous_leg is not None else None for k in LEG_FIELDS}
+        if not lv.get('zayavka'):
+            if previous_leg is not None and previous_leg['zayavka']:
+                lv['zayavka'] = previous_leg['zayavka']
+            elif any(lv.get(k) for k in ('carrier', 'carrier_id', 'driver', 'voditel_id', 'rate')):
+                lv['zayavka'] = next_request_number(con, 'carrier')
         con.execute('INSERT INTO leg(gruz_id, kind, ' + ', '.join(lv) + ') VALUES (?,?' + ',?' * len(lv) + ') '
                     'ON CONFLICT(gruz_id, kind) DO UPDATE SET ' + ', '.join(f'{k}=excluded.{k}' for k in lv),
                     [gid, kind, *lv.values()])
@@ -320,6 +366,9 @@ def raspoznat(con, d):
 
 def _save_card(con, table, fields, d, need, need_msg):
     """Общее сохранение карточки (водитель / контрагент): поля + файлы из «входящих» в папку карточки."""
+    if d.get('id'):
+        previous = dict(one(con, f'SELECT * FROM {table} WHERE id=?', d['id']))
+        d = {**previous, **d, 'files': d.get('files', [])}
     vals = {k: (d.get(k) or '').strip() if isinstance(d.get(k), str) else (d.get(k) or '') for k in fields}
     if not any(vals[k] for k in need):
         raise Oshibka(need_msg)
@@ -351,7 +400,43 @@ def _save_card(con, table, fields, d, need, need_msg):
     return {'id': vid}
 
 
+def save_carrier_details(con, d):
+    details = d.get('carrier_details')
+    if details is None:
+        return
+    details = {k: str(details.get(k) or '').strip() for k in KONTRAGENT_FIELDS}
+    if not details['name'] and not details['inn']:
+        if any(details.values()):
+            raise Oshibka('Для реквизитов перевозчика укажите название или ИНН')
+        d['carrier_id'] = None
+        return
+    cid = d.get('carrier_id')
+    existing = con.execute('SELECT * FROM kontragent WHERE id=?', (cid,)).fetchone() if cid else None
+    if existing and ((details['inn'] and existing['inn'] and details['inn'] != existing['inn']) or
+                     (not details['inn'] and details['name'] != existing['name'])):
+        existing = None
+    if existing is None:
+        key = 'inn' if details['inn'] else 'name'
+        matches = con.execute(f'SELECT * FROM kontragent WHERE {key}=?', (details[key],)).fetchall()
+        if len(matches) > 1:
+            raise Oshibka('Найдено несколько перевозчиков с такими реквизитами. Уточните карточку в справочнике.')
+        existing = matches[0] if matches else None
+    payload = dict(existing) if existing else {}
+    payload.update({k: v for k, v in details.items() if v or not existing})
+    if existing:
+        payload['id'] = existing['id']
+    d['carrier_id'] = _save_card(con, 'kontragent', KONTRAGENT_FIELDS, payload,
+                               ('name', 'inn'), 'Нужно хотя бы название или ИНН')['id']
+    d['carrier'] = details['name']
+    d['carrier_inn'] = details['inn']
+
+
 def voditel_save(con, d):
+    if d.get('id'):
+        d = {**dict(one(con, 'SELECT * FROM voditel WHERE id=?', d['id'])), **d, 'files': d.get('files', [])}
+    if not (d.get('fio') or d.get('auto_plate')):
+        raise Oshibka('Нужно хотя бы ФИО или госномер')
+    save_carrier_details(con, d)
     return _save_card(con, 'voditel', VODITEL_FIELDS, d, ('fio', 'auto_plate'), 'Нужно хотя бы ФИО или госномер')
 
 
@@ -362,6 +447,7 @@ def kontragent_save(con, d):
 def kontragent_delete(con, d):
     con.execute('UPDATE gruz SET client_id=NULL WHERE client_id=?', (d['id'],))
     con.execute('UPDATE leg SET carrier_id=NULL WHERE carrier_id=?', (d['id'],))
+    con.execute('UPDATE fura SET carrier_id=NULL WHERE carrier_id=?', (d['id'],))
     con.execute('DELETE FROM kontragent WHERE id=?', (d['id'],))  # файлы в папке остаются
 
 
@@ -388,8 +474,26 @@ def manager_delete(con, d):
 
 
 def fura_save(con, d):
-    vals = {k: d.get(k) for k in FURA_FIELDS}
-    vals['route'] = json.dumps(vals['route'] or [])
+    if d.get('id') and 'voditel_id' not in d:
+        d['voditel_id'] = one(con, 'SELECT * FROM fura WHERE id=?', d['id'])['voditel_id']
+    save_carrier_details(con, d)
+    if d.get('driver_details') is not None:
+        details = {k: v for k, v in d['driver_details'].items() if k in VODITEL_FIELDS}
+        if d.get('voditel_id'):
+            details['id'] = d['voditel_id']
+        if d.get('carrier_details'):
+            details['carrier'] = d.get('carrier') or ''
+            details['carrier_inn'] = d['carrier_details'].get('inn') or ''
+        saved = voditel_save(con, details)
+        d['voditel_id'] = saved['id']
+        if 'fio' in details:
+            d['driver'] = details['fio']
+    previous = one(con, 'SELECT * FROM fura WHERE id=?', d['id']) if d.get('id') else {}
+    vals = {k: d[k] if k in d else previous[k] if k in previous.keys() else None for k in FURA_FIELDS}
+    if not vals.get('zayavka'):
+        vals['zayavka'] = previous['zayavka'] if previous and previous['zayavka'] else next_request_number(con, 'carrier')
+    route = vals['route'] or []
+    vals['route'] = json.dumps(json.loads(route) if isinstance(route, str) else route)
     if d.get('id'):
         con.execute('UPDATE fura SET ' + ', '.join(f'{k}=?' for k in vals) + ' WHERE id=?', [*vals.values(), d['id']])
         return {'id': d['id']}
@@ -406,20 +510,34 @@ def fura_delete(con, d):
 
 def fura_add(con, d):
     f = one(con, 'SELECT * FROM fura WHERE id=?', d['fura_id'])
-    if f['status'] != 'собирается':
-        raise Oshibka('Фура уже уехала — грузить нельзя')
+    direct = d.get('pickup_mode') == 'sender'
+    if f['status'] != 'собирается' and not (direct and f['status'] == 'в пути'):
+        raise Oshibka('В эту фуру сейчас нельзя загружать груз')
     route = json.loads(f['route'] or '[]')
-    for gid in d.get('gruz_ids', []):
+    selected = []
+    for gid in dict.fromkeys(d.get('gruz_ids', [])):
         g = one(con, 'SELECT * FROM gruz WHERE id=?', gid)
-        if g['status'] not in ('на складе', 'прибыл') or g['sklad_id'] != f['sklad_from']:
+        address = ''
+        if direct:
+            if g['status'] != 'ждёт забора' or g['fura_id'] is not None:
+                raise Oshibka(f'{g["nomer"]} уже забран или находится не у отправителя')
+            leg = con.execute("SELECT from_addr FROM leg WHERE gruz_id=? AND kind='zabor'", (gid,)).fetchone()
+            address = ((leg['from_addr'] if leg else '') or g['from_addr'] or '').strip()
+            if not address:
+                raise Oshibka(f'У {g["nomer"]} не указан адрес забора у отправителя')
+        elif g['status'] not in ('на складе', 'прибыл') or g['sklad_id'] != f['sklad_from']:
             raise Oshibka(f'{g["nomer"]} не лежит на складе погрузки этой фуры')
         if con.execute('SELECT 1 FROM reys WHERE gruz_id=? AND fura_id=?', (gid, f['id'])).fetchone():
             raise Oshibka(f'{g["nomer"]} уже ехал этой фурой')
-        # выгрузка по умолчанию: склад назначения, если фура туда идёт; иначе выбрать вручную
+        selected.append((g, address))
+    for g, address in selected:
         point = g['sklad_to'] if g['sklad_to'] in route else None
-        con.execute('INSERT INTO reys(gruz_id, fura_id, point) VALUES (?,?,?)', (gid, f['id'], point))
-        con.execute("UPDATE gruz SET status='в фуре', fura_id=?, sklad_id=NULL WHERE id=?", (f['id'], gid))
-        add_log(con, gid, d.get('dt'), 'погружен в фуру', f['sklad_from'], f['id'])
+        con.execute('INSERT INTO reys(gruz_id,fura_id,point,pickup_mode,pickup_address,pickup_status,pickup_sklad) '
+                    'VALUES (?,?,?,?,?,?,?)', (g['id'], f['id'], point, 'sender' if direct else 'warehouse',
+                                              address, g['status'], g['sklad_id']))
+        con.execute("UPDATE gruz SET status='в фуре', fura_id=?, sklad_id=NULL WHERE id=?", (f['id'], g['id']))
+        add_log(con, g['id'], d.get('dt'), 'забран фурой у отправителя' if direct else 'погружен в фуру',
+                None if direct else f['sklad_from'], f['id'])
 
 
 def fura_remove(con, d):
@@ -427,10 +545,14 @@ def fura_remove(con, d):
     if f['status'] != 'собирается':
         raise Oshibka('Фура уже уехала — убрать груз нельзя')
     gid = d['gruz_id']
-    con.execute("UPDATE gruz SET status='на складе', fura_id=NULL, sklad_id=? WHERE id=? AND fura_id=?",
-                (f['sklad_from'], gid, f['id']))
+    r = one(con, 'SELECT * FROM reys WHERE gruz_id=? AND fura_id=?', gid, f['id'])
+    status = r['pickup_status'] or ('ждёт забора' if r['pickup_mode'] == 'sender' else 'на складе')
+    sklad_id = None if r['pickup_mode'] == 'sender' else (r['pickup_sklad'] or f['sklad_from'])
+    con.execute('UPDATE gruz SET status=?,fura_id=NULL,sklad_id=? WHERE id=? AND fura_id=?',
+                (status, sklad_id, gid, f['id']))
     con.execute('DELETE FROM reys WHERE gruz_id=? AND fura_id=?', (gid, f['id']))
-    con.execute("DELETE FROM log WHERE gruz_id=? AND fura_id=? AND action='погружен в фуру'", (gid, f['id']))
+    con.execute("DELETE FROM log WHERE gruz_id=? AND fura_id=? AND action IN ('погружен в фуру','забран фурой у отправителя')",
+                (gid, f['id']))
 
 
 def reys_point(con, d):
@@ -589,12 +711,26 @@ def print_doc(con, d):
     import os
     import pechat
     try:
-        path = pechat.build(con, d['kind'], d['id'])
+        if d.get('kind') in ('tn', 'receipt'):
+            import transport_docs
+            path = transport_docs.build(con, d)
+        else:
+            path = pechat.build(con, d['kind'], d['id'])
     except pechat.NetShablona as e:
         raise Oshibka(str(e))
     if d.get('open', True):
         os.startfile(path)
-    return {'file': path.name}
+    from urllib.parse import quote
+    return {'file': path.name, 'url': '/documents/' + quote(path.name)}
+
+
+def document_preview(con, d):
+    import pechat
+    import transport_docs
+    try:
+        return transport_docs.prepare(con, d.get('kind'), d.get('id'), d.get('segment', ''), d.get('fields'))
+    except pechat.NetShablona as e:
+        raise Oshibka(str(e))
 
 
 def export_excel(con, d):
@@ -606,7 +742,7 @@ def export_excel(con, d):
     return {'file': path.name, 'rows': len(d.get('rows') or [])}
 
 
-ACTIONS = {f.__name__: f for f in (vypiska_load, oplaty_list, oplata_link, oplata_unlink, platezh_ignore, print_doc, export_excel, gruz_save, gruz_delete, gruz_accept, gruz_deliver, gruz_split, sklad_save,
+ACTIONS = {f.__name__: f for f in (document_preview, vypiska_load, oplaty_list, oplata_link, oplata_unlink, platezh_ignore, print_doc, export_excel, gruz_save, gruz_delete, gruz_accept, gruz_deliver, gruz_split, sklad_save,
                                    sklad_delete, manager_save, manager_delete, raspoznat, voditel_save,
                                    voditel_delete, kontragent_save, kontragent_delete, fura_save, fura_delete, fura_add, fura_remove, reys_point,
                                    fura_send, fura_unload)}
@@ -643,7 +779,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.split('?')[0] == '/login':
             return self.send(200, (STATIC / 'login.html').read_bytes(), 'text/html; charset=utf-8')
         if not self.authorized():  # без входа — только страница входа
-            if self.path.startswith(('/api/', '/files/')):
+            if self.path.startswith(('/api/', '/files/', '/documents/')):
                 return self.send(401, {'error': 'нужно войти', 'login': True})
             return self.send(302, b'', 'text/plain', [('Location', '/login')])
         if self.path == '/api/state':
@@ -652,6 +788,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, state(con))
             finally:
                 con.close()
+        if self.path.startswith('/documents/'):
+            from urllib.parse import unquote, quote
+            import pechat
+            name = unquote(self.path[len('/documents/'):].split('?')[0])
+            root = pechat.OUT_DIR.resolve()
+            p = (root / name).resolve()
+            if p.parent != root or p.suffix.lower() != '.docx' or not p.is_file():
+                return self.send(404, {'error': 'нет документа'})
+            return self.send(200, p.read_bytes(),
+                             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                             [('Content-Disposition', "attachment; filename*=UTF-8''" + quote(p.name))])
         if self.path.startswith('/files/'):  # документы водителей — для просмотра рядом с полями
             from urllib.parse import unquote
             p = (FILES / unquote(self.path[len('/files/'):].split('?')[0])).resolve()
@@ -687,7 +834,7 @@ class Handler(BaseHTTPRequestHandler):
                     vhod.logout(con, self.token())
                     con.commit()
                     return self.send(200, {'ok': True}, headers=[('Set-Cookie', 'sklad_s=; Path=/; Max-Age=0')])
-                err = vhod.change(con, d.get('old'), d.get('new'), PORT)
+                err = vhod.change(con, d.get('old'), d.get('new'), PORT, user=vhod.session_login(con, self.token()))
                 con.commit()
                 return self.send(400, {'error': err}) if err else self.send(200, {'ok': True, 'relogin': True})
             finally:
@@ -727,7 +874,7 @@ def main():
     ThreadingHTTPServer.allow_reuse_address = False
     ThreadingHTTPServer.allow_reuse_port = False
     try:
-        srv = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
+        srv = WarehouseHTTPServer((BIND_HOST, PORT), Handler)
     except OSError:  # уже запущен (например, второй щелчок по ярлыку) — просто открываем страницу
         print(f'Склад уже запущен, открываю {url}')
         webbrowser.open(url)

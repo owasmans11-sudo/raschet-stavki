@@ -265,15 +265,19 @@ def build(con, kind, obj_id):
         f = dict(con.execute('SELECT * FROM fura WHERE id=?', (obj_id,)).fetchone())
         route = json.loads(f['route'] or '[]')
         gs = [dict(r) for r in con.execute('SELECT g.* FROM gruz g JOIN reys r ON r.gruz_id=g.id WHERE r.fura_id=?', (obj_id,))]
+        pickups = [dict(r) for r in con.execute('SELECT pickup_mode,pickup_address FROM reys WHERE fura_id=?', (obj_id,))]
+        direct = any(r['pickup_mode'] == 'sender' for r in pickups)
+        loading_places = ([sk_place(f['sklad_from'])] if any(r['pickup_mode'] != 'sender' for r in pickups) or not pickups else [])
+        loading_places += [r['pickup_address'] for r in pickups if r['pickup_mode'] == 'sender' and r['pickup_address']]
         tpl = template_for('fura', 'ООО ВЛ')
         tot = lambda k: sum(g[k] or 0 for g in gs)
         v = dict(nomer=f['zayavka'], from_city=sk.get(f['sklad_from'], {}).get('name', ''),
                  to_city=' → '.join(sk[i]['name'] for i in route if i in sk), dt_load=f['dt_out'], rate=f['rate'],
-                 sender=tpl['co']['legal'], load_place=sk_place(f['sklad_from']),
+                 sender='' if direct else tpl['co']['legal'], load_place='; '.join(dict.fromkeys(loading_places)),
                  receiver=tpl['co']['legal'], unload_place='; '.join(f'{k}) {sk_place(i)}' for k, i in enumerate(route, 1)),
                  cargo=cargo_text(tot('kg'), tot('m3'), tot('places'), f'Сборный груз, {len(gs)} отправок'),
                  transport=f'{n(f["cap_m3"], 0)} м³, {n(f["cap_t"], 1)} т', auto=f['nomer_ts'],
-                 carrier=f['carrier'], nds=f['rate_form'])
+                 carrier=f['carrier'], nds=f['rate_form'], carrier_firm=firm(con, f.get('carrier_id')))
         v.update({k: x for k, x in driver_values(con, f['voditel_id'], f['driver']).items() if x})
         body, who, nomer = carrier_doc(tpl, v), f['carrier'], f['nomer_ts']
     else:

@@ -88,9 +88,75 @@ def ocr_image(img):
     return best
 
 
+def _excel_cell(value, number_format=''):
+    from datetime import date, datetime, time
+    if value is None:
+        return ''
+    if isinstance(value, (datetime, date)):
+        return value.strftime('%d.%m.%Y')
+    if isinstance(value, time):
+        return value.strftime('%H:%M')
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        text = str(int(value)) if int(value) == value else str(value)
+        if re.fullmatch(r'0+', number_format or '') and int(value) == value:
+            text = text.zfill(len(number_format))
+        return text
+    return str(value).strip()
+
+
+def read_excel(name, data):
+    """Чтение значений ячеек без запуска Excel, формул или макросов."""
+    lines = []
+    if Path(name).suffix.lower() in {'.xlsx', '.xlsm'}:
+        import openpyxl
+        book = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        try:
+            for sheet in book.worksheets:
+                if sheet.sheet_state != 'visible':
+                    continue
+                if (sheet.max_row or 0) * (sheet.max_column or 0) > 300000:
+                    raise ValueError('В Excel слишком большая область ячеек. Сохраните нужный лист отдельным файлом.')
+                for row in sheet.iter_rows():
+                    values = [_excel_cell(c.value, c.number_format) for c in row]
+                    text = '\t'.join(values).strip()
+                    if text:
+                        lines.append(text)
+        finally:
+            book.close()
+    else:
+        try:
+            import xlrd
+        except ImportError:
+            sys.path.insert(0, str(ROOT / 'app-sklad' / '_vendor'))
+            import xlrd
+        book = xlrd.open_workbook(file_contents=data, on_demand=True, formatting_info=True, logfile=io.StringIO())
+        try:
+            for sheet in book.sheets():
+                if sheet.visibility:
+                    continue
+                if sheet.nrows * sheet.ncols > 300000:
+                    raise ValueError('В Excel слишком большая область ячеек. Сохраните нужный лист отдельным файлом.')
+                for i in range(sheet.nrows):
+                    values = []
+                    for cell in sheet.row(i):
+                        value = xlrd.xldate_as_datetime(cell.value, book.datemode) if cell.ctype == xlrd.XL_CELL_DATE else cell.value
+                        fmt = book.format_map[book.xf_list[cell.xf_index].format_key].format_str
+                        values.append(_excel_cell(value, fmt) if cell.ctype != xlrd.XL_CELL_ERROR else '')
+                    text = '\t'.join(values).strip()
+                    if text:
+                        lines.append(text)
+        finally:
+            book.release_resources()
+    if not lines:
+        raise ValueError('В Excel нет доступного текста ячеек. Если документ вставлен картинкой, загрузите PDF или фото; формулы пересчитайте и сохраните в Excel.')
+    return '\n'.join(lines)
+
+
 def read_file(name, data):
     """Текст файла: фото и сканы — OCR; PDF с текстом и Word — как есть."""
     ext = Path(name).suffix.lower()
+    if ext in {'.xlsx', '.xlsm', '.xls'}:
+        return read_excel(name, data)
     if ext in IMAGE_EXT:
         from PIL import Image
         return ocr_image(Image.open(io.BytesIO(data)))
@@ -118,7 +184,7 @@ def read_file(name, data):
         raise ValueError('Фото HEIC (iPhone) не открывается — сохраните как JPG или скопируйте картинку и вставьте Ctrl+V')
     if ext in ('.txt', '.csv'):
         return data.decode('utf-8', 'ignore')
-    raise ValueError(f'Не умею читать файлы {ext} — нужны фото, PDF или Word (.docx)')
+    raise ValueError(f'Не умею читать файлы {ext} — нужны фото, PDF, Word (.docx) или Excel (.xlsx, .xlsm, .xls)')
 
 
 # ---------- разбор полей ----------
@@ -130,7 +196,8 @@ HOMO = str.maketrans('ABCEHKMOPTXYaceopxyb', 'АВСЕНКМОРТХУасеор
 MRZ_TR = dict(zip('ABVGDE2JZIQKLMNOPRSTUFHC34WXY9678', 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'))
 ISSUER = re.compile(r'\b(УФМС|ОУФМС|МВД|ОВД|УВД|ГУ|ТП|ОТДЕЛ\w*|ОТДЕЛЕНИ\w*|МИГРАЦИ\w*)\b', re.I)
 DATE = r'(\d{2})[.\s,/-]{1,2}(\d{2})[.\s,/-]{1,2}((?:19|20)\d{2})'
-PASSPORT_NUM = re.compile(r'(?<![\d.])(\d{2})\s?(\d{2})\s?(\d{6})(?![\d.])')
+# В карточках номер может быть записан как «серии 12 34 № 567890», с любыми пробелами.
+PASSPORT_NUM = re.compile(r'(?<![\d.])(\d{2})\s*(\d{2})\s*(?:№\s*)?(\d{6})(?![\d.])')
 PATRON = r'(?:вич|вна|ична|оглы|кызы|улы)'
 WORD = r'[А-ЯЁа-яё][А-ЯЁа-яё-]+'
 NOT_NAME = re.compile(r'^(паспорт|россия|российская|федерация|выдан|отделом|отделением|уфмс|мвд|гу|по|области|область|края|край|'
@@ -470,7 +537,18 @@ def from_files(files):
     parsed, docs = [], []
     for name, data in files:
         try:
-            typ, f = parse(read_file(name, data))
+            text = read_file(name, data)
+            typ, f = parse(text)
+            # Карточка предприятия в окне водителя относится к перевозчику,
+            # ее руководитель не должен становиться водителем.
+            if re.search(r'карточка\s+(?:предприятия|организации)|наименование\s+предприятия', text, re.I):
+                import firma
+                companies = firma.candidates(text)
+                if len(companies) == 1:
+                    company = companies[0]
+                    field_name = lambda k: 'carrier' if k == 'name' else 'carrier_' + k
+                    f = {field_name(k): v for k, v in company.items() if v}
+                    typ = 'карточка перевозчика'
             parsed.append((typ, f))
             docs.append({'name': name, 'type': typ, 'found': list(f)})
         except Exception as e:
@@ -482,6 +560,11 @@ def from_files(files):
         for k, v in f.items():
             merged.setdefault(k, v)
     bad = doubts(merged)
+    if merged.get('carrier_inn'):
+        import firma
+        company = {('name' if k == 'carrier' else k[len('carrier_'):]): v
+                   for k, v in merged.items() if k == 'carrier' or k.startswith('carrier_')}
+        bad.update({('carrier' if k == 'name' else 'carrier_' + k): v for k, v in firma.doubts(company).items()})
     for k in ('passport_mrz_ok', 'fio_mrz'):  # служебные пометки — не поля
         merged.pop(k, None)
     for d in docs:

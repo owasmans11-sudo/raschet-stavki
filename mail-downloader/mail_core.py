@@ -29,6 +29,8 @@ MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 BATCH = 50
+JUNK_IMG = {".jpg", ".jpeg", ".png", ".gif", ".bmp"}
+JUNK_IMG_SIZE = 15_000  # картинка меньше 15 КБ — логотип/иконка из подписи, не документ
 
 OPIS_CSV = "Опись.csv"
 OPIS_HTML = "Опись.html"
@@ -290,10 +292,14 @@ def save_message(raw, ctx, gm_msgid=None):
     link = web_link(ctx["host"], ctx["login"], subject, msg_id, gm_msgid)
     folder = target_dir(ctx["out_dir"], ctx["layout"], msg_dt, from_addr)
     opis = ctx["opis"]
+    # «помойка» (по желанию): тексты писем и мелкие картинки (логотипы из подписей) — отдельно от документов
+    junk = target_dir(ctx["junk_dir"], ctx["layout"], msg_dt, from_addr) if ctx.get("junk_dir") else None
 
     files, saved = [], 0
     for filename, payload in iter_attachments(msg):
-        path, new = save_once(folder, safe_name(f"{msg_date}_{filename}"), payload)
+        small_pic = os.path.splitext(filename)[1].lower() in JUNK_IMG and (
+            len(payload) < JUNK_IMG_SIZE or filename.lower().startswith("mailrusigimg"))  # картинка подписи Mail.ru
+        path, new = save_once(junk if junk and small_pic else folder, safe_name(f"{msg_date}_{filename}"), payload)
         files.append((filename, path))
         if new:
             saved += 1
@@ -321,7 +327,7 @@ def save_message(raw, ctx, gm_msgid=None):
         ]
         payload = ("\n".join(lines) + "\n").encode("utf-8-sig")
         name = safe_name(f"{stamp}_ПИСЬМО_{subject or 'без темы'}", 120) + ".txt"
-        text_path, created = save_once(folder, name, payload)
+        text_path, created = save_once(junk or folder, name, payload)
         text_new = int(created)
 
     base = {
@@ -339,15 +345,16 @@ def save_message(raw, ctx, gm_msgid=None):
 
 def download_attachments(host, login, password, date_from, date_to, out_dir,
                          layout="Одной папкой", save_text=True,
-                         log=print, progress=None, stop_flag=None, port=993):
+                         log=print, progress=None, stop_flag=None, port=993, junk_dir=None):
     """Скачивает вложения из INBOX за дни с `date_from` по `date_to` включительно.
 
+    junk_dir — если задан, тексты писем и мелкие картинки (< JUNK_IMG_SIZE) кладутся туда, а не к документам.
     Возвращает (писем_просмотрено, файлов_сохранено, текстов_сохранено).
     """
     os.makedirs(out_dir, exist_ok=True)
     opis = Opis(out_dir)
     ctx = {"host": host, "login": login, "out_dir": out_dir, "layout": layout,
-           "save_text": save_text, "log": log, "opis": opis}
+           "save_text": save_text, "log": log, "opis": opis, "junk_dir": junk_dir}
     gmail = "gmail" in host.lower()
     fetch_what = "(X-GM-MSGID BODY.PEEK[])" if gmail else "(BODY.PEEK[])"
 

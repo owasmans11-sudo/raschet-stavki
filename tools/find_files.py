@@ -34,7 +34,11 @@ SKIP_DIRS = {'.git', '__pycache__', 'node_modules', '.claude'}
 # служебные папки проекта (память агента, планы, скрипты) — владельцу в поиске не нужны
 SKIP_PROJECT = {os.path.join(PROJECT, d).lower() for d in
                 ('context', 'retros', 'plans', 'prompts', 'rules', 'tools', 'mail-downloader')}
-SKIP_PROJECT_FILES = {'claude.md', 'onboarding.md', 'readme.md', 'поиск файлов.bat', 'распознать сканы.bat'}
+# «Перевозки» ищем: с 05.11.2026 туда ПЕРЕНОСЯТСЯ файлы из почты (не копии); пропускаем только отчёты в её корне
+REPORTS_DIR = os.path.normcase(os.path.join(WORK, 'Перевозки'))
+SKIP_PROJECT.add(os.path.join(WORK, 'Почта', 'ПОМОЙКА').lower())  # тексты писем и логотипы — не искать, не распознавать
+SKIP_PROJECT_FILES = {'claude.md', 'onboarding.md', 'readme.md', 'поиск файлов.bat', 'распознать сканы.bat',
+                      'настройка почты.bat'}
 MAX_TEXT = 300_000
 ENDINGS = {'а', 'у', 'е', 'ы', 'ом', 'ым', 'ой', 'ой', 'ою', 'ым', 'ов', 'ой', 'ах', 'ам', 'ами', 'ую', 'ая', 'ого', 'ому'}
 LAT2CYR =dict(zip('abvgdezijklmnoprstufhcy', 'абвгдезийклмнопрстуфхцы'))
@@ -134,8 +138,11 @@ def iter_files(roots):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS
                            and os.path.join(dirpath, d).lower() not in SKIP_PROJECT]
             in_project_root = os.path.normcase(dirpath) == os.path.normcase(PROJECT)
+            in_reports = os.path.normcase(dirpath) == REPORTS_DIR
             for fn in filenames:
                 if in_project_root and fn.lower() in SKIP_PROJECT_FILES:
+                    continue
+                if in_reports and fn.lower().startswith('отчёт'):
                     continue
                 if not fn.startswith('~$'):
                     yield os.path.join(dirpath, fn)

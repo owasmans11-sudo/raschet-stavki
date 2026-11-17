@@ -191,6 +191,8 @@ def build():
         cat = classes.get(low) or (kc.classify(name, raw)[0] if raw else (kc.UNREAD if ext != '.pdf' else kc.UNREAD))
         if not raw and ext in ff.IMG_EXT:
             cat = None
+        if kc.driver_by_name(name):  # «права.jpg», «ВУ Иванов», «СТС 644» — имя надёжнее нечитаемого фото (05.11.2026)
+            cat = kc.DRIVER
         card = {'type': TYPE.get(cat, 'Фото без текста'), 'kind': '', 'num': '', 'date': '', 'counterparty': '',
                 'load_place': '', 'driver': '', 'amount': None, 'vat': '', 'check': '',
                 'received': (lambda m: f'{m[3]}.{m[2]}.{m[1]}' if m else '')(re.match(r'(20\d\d)-(\d\d)-(\d\d)_', name)),

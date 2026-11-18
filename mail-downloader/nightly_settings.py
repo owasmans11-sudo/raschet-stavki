@@ -16,7 +16,7 @@ from tkinter import messagebox, ttk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from nightly_mail import DEFAULT_DIR, LOG, check_login, load_settings, save_settings
 
-BOXES = ["", ""]  # адреса задаются при первой настройке
+BOXES = ["Vostok.logist@list.ru", "Vostok.logist.sat@list.ru"]  # ящики ВЛ (2026-11-05); можно поменять в окне
 HOST = "imap.mail.ru"  # list.ru, mail.ru, bk.ru, inbox.ru — один сервер Mail.ru
 REPORTS = r"C:\РАБОТА\Перевозки"
 

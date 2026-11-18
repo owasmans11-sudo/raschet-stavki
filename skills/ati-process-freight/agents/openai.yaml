@@ -1,0 +1,4 @@
+interface:
+  display_name: "������ ������ ATI"
+  short_description: "����� ������, ������ ������ � ����������� ATI"
+  default_prompt: "Используй $ati-process-freight. Проверь все заявки по нашему фильтру ATI, рассчитай цену и сохрани внутренние комментарии."

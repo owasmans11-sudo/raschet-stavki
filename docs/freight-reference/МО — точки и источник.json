@@ -1,0 +1,597 @@
+{
+  "date": "2026-11-18",
+  "source": "https://router.project-osrm.org/table/v1/driving/37.6173,55.7558;37.9917,55.9206;37.7339,55.9105;37.8328,55.9163;37.8539,56.0104;37.9208,55.9711;38.0528,55.9606;37.9581,55.7963;37.8617,55.7597;37.8932,55.6765;38.2258,55.567;38.12,55.5953;38.27,55.425;37.758,55.436;37.7097,55.5519;37.5547,55.4312;37.4545,55.1481;37.41,54.922;38.077,54.8869;38.19,54.834;38.7783,55.0952;38.652,55.323;39.032,55.383;38.979,55.806;38.65,55.781;38.4438,55.8544;38.4469,55.7848;37.445,55.889;37.3302,55.8311;37.2639,55.6786;36.859,55.914;36.977,56.185;36.728,56.333;37.517,56.344;37.166,56.744;38.133,56.31;37.474,56.012;37.5,55.934;36.733,55.387;36.027,55.506;36.855,55.729;36.196,55.701?annotations=distance,duration",
+  "cities": [
+    [
+      "Москва",
+      37.6173,
+      55.7558
+    ],
+    [
+      "Щёлково",
+      37.9917,
+      55.9206
+    ],
+    [
+      "Мытищи",
+      37.7339,
+      55.9105
+    ],
+    [
+      "Королёв",
+      37.8328,
+      55.9163
+    ],
+    [
+      "Пушкино",
+      37.8539,
+      56.0104
+    ],
+    [
+      "Ивантеевка",
+      37.9208,
+      55.9711
+    ],
+    [
+      "Фрязино",
+      38.0528,
+      55.9606
+    ],
+    [
+      "Балашиха",
+      37.9581,
+      55.7963
+    ],
+    [
+      "Реутов",
+      37.8617,
+      55.7597
+    ],
+    [
+      "Люберцы",
+      37.8932,
+      55.6765
+    ],
+    [
+      "Раменское",
+      38.2258,
+      55.567
+    ],
+    [
+      "Жуковский",
+      38.12,
+      55.5953
+    ],
+    [
+      "Бронницы",
+      38.27,
+      55.425
+    ],
+    [
+      "Домодедово",
+      37.758,
+      55.436
+    ],
+    [
+      "Видное",
+      37.7097,
+      55.5519
+    ],
+    [
+      "Подольск",
+      37.5547,
+      55.4312
+    ],
+    [
+      "Чехов",
+      37.4545,
+      55.1481
+    ],
+    [
+      "Серпухов",
+      37.41,
+      54.922
+    ],
+    [
+      "Ступино",
+      38.077,
+      54.8869
+    ],
+    [
+      "Кашира",
+      38.19,
+      54.834
+    ],
+    [
+      "Коломна",
+      38.7783,
+      55.0952
+    ],
+    [
+      "Воскресенск",
+      38.652,
+      55.323
+    ],
+    [
+      "Егорьевск",
+      39.032,
+      55.383
+    ],
+    [
+      "Орехово-Зуево",
+      38.979,
+      55.806
+    ],
+    [
+      "Павловский Посад",
+      38.65,
+      55.781
+    ],
+    [
+      "Ногинск",
+      38.4438,
+      55.8544
+    ],
+    [
+      "Электросталь",
+      38.4469,
+      55.7848
+    ],
+    [
+      "Химки",
+      37.445,
+      55.889
+    ],
+    [
+      "Красногорск",
+      37.3302,
+      55.8311
+    ],
+    [
+      "Одинцово",
+      37.2639,
+      55.6786
+    ],
+    [
+      "Истра",
+      36.859,
+      55.914
+    ],
+    [
+      "Солнечногорск",
+      36.977,
+      56.185
+    ],
+    [
+      "Клин",
+      36.728,
+      56.333
+    ],
+    [
+      "Дмитров",
+      37.517,
+      56.344
+    ],
+    [
+      "Дубна",
+      37.166,
+      56.744
+    ],
+    [
+      "Сергиев Посад",
+      38.133,
+      56.31
+    ],
+    [
+      "Лобня",
+      37.474,
+      56.012
+    ],
+    [
+      "Долгопрудный",
+      37.5,
+      55.934
+    ],
+    [
+      "Наро-Фоминск",
+      36.733,
+      55.387
+    ],
+    [
+      "Можайск",
+      36.027,
+      55.506
+    ],
+    [
+      "Звенигород",
+      36.855,
+      55.729
+    ],
+    [
+      "Руза",
+      36.196,
+      55.701
+    ]
+  ],
+  "waypoints": [
+    {
+      "hint": "jiCZg____38EAAAADAAAAEsDAAAPAgAARnKHPygV1T9sYTtDFPrqQgQAAAAMAAAASwMAAA8CAAC1KgEANP09AlPGUgOU_j0CGMRSAyAArw8AAAAA",
+      "location": [
+        37.616948,
+        55.756371
+      ],
+      "name": "",
+      "distance": 67.30221194
+    },
+    {
+      "hint": "zOW5gQwLyIEKAAAAFAAAAAAAAABcAAAAM6A0QX5SrkEAAAAA2GHQQgoAAAAUAAAAAAAAAFwAAAC1KgEAcLdDAo1HVQMUtUMC2EdVAwAAzwAAAAAA",
+      "location": [
+        37.992304,
+        55.920525
+      ],
+      "name": "Советская улица",
+      "distance": 38.67055393
+    },
+    {
+      "hint": "xoIxiMuCMYgpAAAAAgAAAAAAAAASAQAAINaIQcmTPz8AAAAA2O3iQikAAAACAAAAAAAAABIBAAC1KgEAgsY_AqQgVQMMxj8CZCBVAwAAvxMAAAAA",
+      "location": [
+        37.734018,
+        55.910564
+      ],
+      "name": "",
+      "distance": 10.25627049
+    },
+    {
+      "hint": "FccJjhjHCY4AAAAAOgAAAAAAAAAAAAAAAAAAAMObwEEAAAAAAAAAAAAAAAA6AAAAAAAAAAAAAAC1KgEAMEJBAok0VQNgSEECDDdVAwAAvw8AAAAA",
+      "location": [
+        37.831216,
+        55.915657
+      ],
+      "name": "",
+      "distance": 122.1910466
+    },
+    {
+      "hint": "QsxqhEjMaoQyAAAABAAAAKsAAAC5AAAAqH2qQXuWnj9Xh45CfCeaQjIAAAAEAAAAqwAAALkAAAC1KgEAjZpBAqamVgPMmkECoKZWAwwAnwAAAAAA",
+      "location": [
+        37.853837,
+        56.010406
+      ],
+      "name": "",
+      "distance": 3.984608455
+    },
+    {
+      "hint": "AjIilQYyIpUiAAAA2AAAAAAAAABvAAAAkTtmQfPOs0IAAAAAODM5QiIAAADYAAAAAAAAAG8AAAC1KgEAH6BCAh0NVgMgoEICHA1WAwAAbw8AAAAA",
+      "location": [
+        37.920799,
+        55.971101
+      ],
+      "name": "",
+      "distance": 0.1276510328
+    },
+    {
+      "hint": "QqrKhtuaq4cOAQAAFwAAAHYAAACQAgAASa5hQur9kUDJ5MNBIJ8IQ4cAAAALAAAAOwAAAEgBAAC1KgEAzqNEAkTkVQPAo0QCGORVAwIAjxEAAAAA",
+      "location": [
+        38.052814,
+        55.960644
+      ],
+      "name": "",
+      "distance": 4.976382906
+    },
+    {
+      "hint": "LoO1iWAHOY4CAAAANgAAADsAAADOAQAAYjuTP4vtsEEj2cJBLZ1AQwIAAAA2AAAAOwAAAM4BAAC1KgEATjFDAiJiUwPUMUMCTGJTAwYAvxQAAAAA",
+      "location": [
+        37.957966,
+        55.796258
+      ],
+      "name": "",
+      "distance": 9.621867158
+    },
+    {
+      "hint": "JdCQkyjQkJMAAAAACQAAAAAAAAAPAAAAAAAAABwWdkAAAAAAAC3KQAAAAAAJAAAAAAAAAA8AAAC1KgEAALtBAh_TUgNEuUECVNNSAwAAXwYAAAAA",
+      "location": [
+        37.862144,
+        55.759647
+      ],
+      "name": "",
+      "distance": 28.48111616
+    },
+    {
+      "hint": "fHpcif___38KAAAACgAAAHkBAABwAQAALvoAQAAAAABeRZ1CMliZQgUAAAAFAAAAvQAAALcAAAC1KgEA0DJCAuONUQNQNEICVI5RAwYAPxUAAAAA",
+      "location": [
+        37.892816,
+        55.676387
+      ],
+      "name": "",
+      "distance": 27.23897173
+    },
+    {
+      "hint": "OG26gR5TVJNlAQAAJwAAAGQAAAAoAAAA5yGVQv72_EAyfKZBvEoGQbIAAAAUAAAAMgAAABQAAAC1KgEAh0dHApjiTwOIR0cCmOJPAwQA3wsAAAAA",
+      "location": [
+        38.225799,
+        55.567
+      ],
+      "name": "",
+      "distance": 0.06307572617
+    },
+    {
+      "hint": "_VZWgBYgZ4ecAAAAIwAAABMAAAAAAAAAuCmCQpkXakGa-vdAAAAAAJwAAAAjAAAAEwAAAAAAAAC1KgEAEapFAlxRUANAqkUCJFFQAwIATw8AAAAA",
+      "location": [
+        38.119953,
+        55.595356
+      ],
+      "name": "",
+      "distance": 6.90363683
+    },
+    {
+      "hint": "xUjqgIQ80IEUAAAAaAAAAAAAAAAAAAAAhINmQUL_j0IAAAAAAAAAABQAAABoAAAAAAAAAAAAAAC1KgEAFPRHAvO3TQMw9EcC6LdNAwAAPwIAAAAA",
+      "location": [
+        38.269972,
+        55.425011
+      ],
+      "name": "Бельский переулок",
+      "distance": 2.154701374
+    },
+    {
+      "hint": "Eq-pgZ7_VIykAAAAdQAAAL4AAAAAAAAAAv3kQqW3oUI3EgRDAAAAAKQAAAB1AAAAvgAAAAAAAAC1KgEAdyZAAtfiTQMwJEAC4OJNAwYAHwAAAAAA",
+      "location": [
+        37.758583,
+        55.435991
+      ],
+      "name": "Рабочая улица",
+      "distance": 36.92678545
+    },
+    {
+      "hint": "q-K8ia3ivIkFAQAAAAAAABQAAAAAAAAAr2nZQgAAAABufQRBAAAAAAUBAAAAAAAAFAAAAAAAAAC1KgEAeWk_AsemTwOEZz8CnKdPAwIAnwEAAAAA",
+      "location": [
+        37.710201,
+        55.551687
+      ],
+      "name": "",
+      "distance": 39.50924814
+    },
+    {
+      "hint": "wYiegMFFqoABAAAAAQAAAAwAAABJAAAAgSaiP-Rgfj9Sn4BBHEHAQgEAAAABAAAADAAAAEkAAAC1KgEAIQo9AjLQTQMMCj0CINBNAwIA7xIAAAAA",
+      "location": [
+        37.554721,
+        55.431218
+      ],
+      "name": "Революционный проспект",
+      "distance": 2.404953237
+    },
+    {
+      "hint": "mwzChlevH4gQAAAAGwAAADoBAABiAAAA-7k5QSzFk0H6OFpDaBaIQhAAAAAbAAAAOgEAAGIAAAC1KgEAKIQ7AuB9SQOkgjsCRH5JAwoAjwEAAAAA",
+      "location": [
+        37.454888,
+        55.148
+      ],
+      "name": "Почтовая улица",
+      "distance": 27.14072981
+    },
+    {
+      "hint": "YeLJg2fiyYNDAAAANQAAAAAAAACOAAAAJqriQb35rUEAAAAAVAptQkMAAAA1AAAAAAAAAI4AAAC1KgEAg9Q6AvgKRgPQ1DoCEAtGAwAAvxQAAAAA",
+      "location": [
+        37.409923,
+        54.921976
+      ],
+      "name": "",
+      "distance": 5.613332579
+    },
+    {
+      "hint": "uVlNhBXO4IgOAAAAJAAAAAAAAAA9AAAANh2wQZ3iVkIAAAAAMBC6Qg4AAAAkAAAAAAAAAD0AAAC1KgEAUQJFAiKCRQNIAkUC9IFFAwAADwYAAAAA",
+      "location": [
+        38.077009,
+        54.886946
+      ],
+      "name": "улица Андропова",
+      "distance": 5.153264043
+    },
+    {
+      "hint": "mpoEjJ2aBIwAAAAA6AEAAAAAAAAnAQAAAAAAABB6B0MAAAAAPOyjQgAAAADoAQAAAAAAACcBAAC1KgEAH7FGAji2RAOwu0YCULNEAwAADwAAAAAA",
+      "location": [
+        38.187295,
+        54.834744
+      ],
+      "name": "",
+      "distance": 192.5764585
+    },
+    {
+      "hint": "t0SoibpEqIksAAAAZwAAAAAAAADtAQAAC-GUQShOKkIAAAAAwJlNQywAAABnAAAAAAAAAO0BAAC1KgEANrxPAuGtSAO8tU8CoK9IAwAAnwEAAAAA",
+      "location": [
+        38.779958,
+        55.094753
+      ],
+      "name": "",
+      "distance": 117.0127883
+    },
+    {
+      "hint": "Rxg6h2PKzoqnAAAAQAAAAKMGAAAAAAAAA-o5Qoy6jUH8AexDAAAAAKcAAABAAAAAowYAAAAAAAC1KgEA28ZNAsknTANgyE0CeClMAxQAXwcAAAAA",
+      "location": [
+        38.651611,
+        55.322569
+      ],
+      "name": "",
+      "distance": 53.96359381
+    },
+    {
+      "hint": "dfZ0gafTa40EAAAAPAAAAB4AAAAxAAAAJidHQD0xJELiVKdBg7sIQgQAAAA8AAAAHgAAADEAAAC1KgEA_pRTArMTTQPAlFMC2BNNAwYALw4AAAAA",
+      "location": [
+        39.032062,
+        55.382963
+      ],
+      "name": "улица Лейтенанта Шмидта",
+      "distance": 5.693611464
+    },
+    {
+      "hint": "AyyGgfBF_4ETAAAAFAAAADYAAAAAAAAAvKJbQb7xWUHuRRVCAAAAABMAAAAUAAAANgAAAAAAAAC1KgEALcZSApeIUwO4xVICMIhTAwQArwcAAAAA",
+      "location": [
+        38.979117,
+        55.806103
+      ],
+      "name": "",
+      "distance": 13.61189885
+    },
+    {
+      "hint": "nYlfk3qsX5MEAAAAFAAAAAIAAAAAAAAAEsSOQHjMskHXvfQ_AAAAAAQAAAAUAAAAAgAAAAAAAAC1KgEAacBNAggnUwOQwE0CiCZTAwIATxAAAAAA",
+      "location": [
+        38.649961,
+        55.781128
+      ],
+      "name": "Павловская улица",
+      "distance": 14.45985798
+    },
+    {
+      "hint": "IZFLgfq3Y4MsAAAALgAAAAoAAAAAAAAArUsfQlLTIELJLxRBAAAAACwAAAAuAAAACgAAAAAAAAC1KgEAm5xKAqlFVAMYm0oCQEVUAwIArwkAAAAA",
+      "location": [
+        38.444187,
+        55.854505
+      ],
+      "name": "Патриаршая улица",
+      "distance": 26.89735471
+    },
+    {
+      "hint": "KGoXjP___38TAAAAfgAAAAAAAABFAAAA7UiAQEBiskEAAAAAKrNkQQkAAAA_AAAAAAAAACIAAAC1KgEAyKVKAjA1UwM0p0oCYDVTAwAArxUAAAAA",
+      "location": [
+        38.446536,
+        55.784752
+      ],
+      "name": "",
+      "distance": 23.45956538
+    },
+    {
+      "hint": "3c3Jgf___38MAAAAEwAAAA0AAAAcAAAATQlXQeTj70Ck0GJBhnD6QQwAAAATAAAADQAAABwAAAC1KgEAOVw7AnPLVAOIXTsCaMxUAwIA_wcAAAAA",
+      "location": [
+        37.444665,
+        55.888755
+      ],
+      "name": "улица Калинина",
+      "distance": 34.40636971
+    },
+    {
+      "hint": "NriUhgpPz4YuAAAACgAAAF8AAAAAAAAA2JgZQS6ZBUC9CZ5BAAAAABcAAAAFAAAAMAAAAAAAAAC1KgEA9p45AlHrUwMYnTkCPOpTAwQAbwgAAAAA",
+      "location": [
+        37.330678,
+        55.831377
+      ],
+      "name": "",
+      "distance": 42.99603529
+    },
+    {
+      "hint": "jRRBhV1mKI4WAAAABwAAAC0BAACcAQAAvKQTQQ-3NUBfk_pCrFMrQxYAAAAHAAAALQEAAJwBAAC1KgEAkpc4AmeVUQMcmjgCiJZRAwQAHxQAAAAA",
+      "location": [
+        37.26325,
+        55.678311
+      ],
+      "name": "",
+      "distance": 52.03555423
+    },
+    {
+      "hint": "vt06hcPdOoU5AAAAAAAAABsAAAAAAAAAIuK-QQAAAAB3ETNBAAAAADkAAAAAAAAAGwAAAAAAAAC1KgEABm0yArgtVQN4bDICEC5VAwIAbwAAAAAA",
+      "location": [
+        36.859142,
+        55.913912
+      ],
+      "name": "",
+      "distance": 13.22118791
+    },
+    {
+      "hint": "ffTUgWgpFowVAAAAAAAAAAAAAAAAAAAAAk8LQQAAAAAAAAAAAAAAABUAAAAAAAAAAAAAAAAAAAC1KgEAkDg0AklRWQNoOTQCqFBZAwAArwgAAAAA",
+      "location": [
+        36.976784,
+        56.185161
+      ],
+      "name": "Почтовая улица",
+      "distance": 22.39077514
+    },
+    {
+      "hint": "maJhgGSGPo0UAAAACgAAAAgAAAAGAAAAqlXgQVGFRUFLfiBBSVH-QBQAAAAKAAAACAAAAAYAAAC1KgEAEG4wAhKSWwPAbDACyJJbAwIAzwIAAAAA",
+      "location": [
+        36.728336,
+        56.332818
+      ],
+      "name": "Литейная улица",
+      "distance": 29.03119752
+    },
+    {
+      "hint": "R7kqjEm5KoxOAAAATQAAAJEAAAAAAAAA-hoLQgFWCEJHpoFCAAAAAE4AAABNAAAAkQAAAAAAAAC1KgEAJ3Y8AtS9WwPIdjwCwL1bAwgAzwAAAAAA",
+      "location": [
+        37.516839,
+        56.34402
+      ],
+      "name": "",
+      "distance": 10.20668215
+    },
+    {
+      "hint": "ojn1i6Y59YtjAAAAAAAAABEAAAAAAAAAtXQkQgAAAAClLOBAAAAAAGMAAAAAAAAAEQAAAAAAAAC1KgEAPSE3AkbVYQOwGzcCQNhhAwIALxQAAAAA",
+      "location": [
+        37.167421,
+        56.743238
+      ],
+      "name": "",
+      "distance": 121.5226934
+    },
+    {
+      "hint": "5pvdhBafBYpOAAAAAAAAAAYAAAA1AQAAbvsBQgAAAAAKMhNAW6kAQ04AAAAAAAAABgAAADUBAAC1KgEAg9xFArE6WwMI3UUC8DhbAwIALwUAAAAA",
+      "location": [
+        38.132867,
+        56.310449
+      ],
+      "name": "",
+      "distance": 50.66774529
+    },
+    {
+      "hint": "Z0dxkiKATJNVAAAALQAAAGkAAAAAAAAAr6qOQXmFEkEonK5BAAAAACoAAAAXAAAANQAAAAAAAAC1KgEAcM87ApOrVgPQzjsC4KxWAwQA7w8AAAAA",
+      "location": [
+        37.47416,
+        56.011667
+      ],
+      "name": "",
+      "distance": 38.39571566
+    },
+    {
+      "hint": "Gdo-k9DbPpNRAAAAAAAAAEEBAABfAAAADoCGQQAAAAAIv4VCXYGfQSgAAAAAAAAAoAAAADAAAAC1KgEAIDM8Ajp8VQNgNDwCMHxVAwwAPwsAAAAA",
+      "location": [
+        37.49968,
+        55.93401
+      ],
+      "name": "",
+      "distance": 20.03529591
+    },
+    {
+      "hint": "KaA3iA2SGJMMAAAANQAAAAAAAAAAAAAA9z-pQEjbr0EAAAAAAAAAAAwAAAA1AAAAAAAAAAAAAAC1KgEAYIAwAl8jTQNIgDACeCNNAwAAzwMAAAAA",
+      "location": [
+        36.733024,
+        55.386975
+      ],
+      "name": "",
+      "distance": 3.171987777
+    },
+    {
+      "hint": "Oi7ogkEu6IIAAAAAGAAAAAwAAAAsAAAA_AErP5BFgEGLKglBRc32QQAAAAAYAAAADAAAACwAAAC1KgEAf7olAlD0TgN4uiUCUPROAwIAfxYAAAAA",
+      "location": [
+        36.027007,
+        55.506
+      ],
+      "name": "",
+      "distance": 0.4420909069
+    },
+    {
+      "hint": "yBnsgRq8aIJ6AAAA0gAAAA0AAABcAAAAA6haQqgEukImn7ZAsYsjQnoAAADSAAAADQAAAFwAAAC1KgEAuVwyAmxbUgPYXDICaFtSAwIADwwAAAAA",
+      "location": [
+        36.854969,
+        55.729004
+      ],
+      "name": "улица Ленина",
+      "distance": 1.998149175
+    },
+    {
+      "hint": "p93MiKjdzIgnAAAAAAAAAIcAAAAAAAAAOiCCQQAAAAC4qmFCAAAAACcAAAAAAAAAhwAAAAAAAAC1KgEAxkwoAjTvUQOgTigCCO5RAwYA_wsAAAAA",
+      "location": [
+        36.195526,
+        55.7013
+      ],
+      "name": "",
+      "distance": 44.75160732
+    }
+  ],
+  "status": "city-centre estimates; no HGV restrictions"
+}
